@@ -92,13 +92,13 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 
 ### 3.1 Page Types
 - [x] Implement `DataPageV1` structure
-- [ ] Implement `DataPageV2` structure
+- [x] Implement `DataPageV2` structure
 - [x] Implement `DictionaryPage` structure
 
 ### 3.2 Page Header (Thrift)
 - [x] Define `PageHeader` Thrift structure
 - [x] Define `DataPageHeader` Thrift structure
-- [ ] Define `DataPageHeaderV2` Thrift structure
+- [x] Define `DataPageHeaderV2` Thrift structure
 - [x] Define `DictionaryPageHeader` Thrift structure
 - [ ] Page header serialization
 - [x] Page header deserialization
@@ -374,11 +374,11 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 - [ ] bad_data/PARQUET-1481.parquet
 
 #### Data Files (Valid Test Data)
-- [ ] data/alltypes_dictionary.parquet (Boolean EOF)
-- [ ] data/alltypes_plain.parquet (Boolean EOF)
-- [ ] data/alltypes_plain.snappy.parquet (Boolean EOF)
-- [ ] data/alltypes_tiny_pages.parquet (Boolean EOF)
-- [ ] data/alltypes_tiny_pages_plain.parquet (Boolean EOF)
+- [x] data/alltypes_dictionary.parquet
+- [x] data/alltypes_plain.parquet
+- [x] data/alltypes_plain.snappy.parquet
+- [ ] data/alltypes_tiny_pages.parquet (RLE varint EOF)
+- [x] data/alltypes_tiny_pages_plain.parquet
 - [x] data/binary.parquet
 - [x] data/binary_truncated_min_max.parquet
 - [x] data/byte_array_decimal.parquet
@@ -386,24 +386,24 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 - [ ] data/byte_stream_split_extended.gzip.parquet (GZIP)
 - [x] data/column_chunk_key_value_metadata.parquet
 - [ ] data/concatenated_gzip_members.parquet (GZIP)
-- [ ] data/data_index_bloom_encoding_stats.parquet (Boolean EOF)
+- [ ] data/data_index_bloom_encoding_stats.parquet (GZIP)
 - [x] data/data_index_bloom_encoding_with_length.parquet
 - [x] data/datapage_v1-corrupt-checksum.parquet
 - [x] data/datapage_v1-snappy-compressed-checksum.parquet
 - [x] data/datapage_v1-uncompressed-checksum.parquet
-- [ ] data/datapage_v2.snappy.parquet (DATA_PAGE_V2)
-- [ ] data/datapage_v2_empty_datapage.snappy.parquet (DATA_PAGE_V2)
-- [ ] data/delta_binary_packed.parquet (Boolean EOF in some columns)
-- [ ] data/delta_byte_array.parquet (Boolean EOF in some columns)
-- [ ] data/delta_encoding_optional_column.parquet (Boolean EOF in some columns)
-- [ ] data/delta_encoding_required_column.parquet (Boolean EOF in some columns)
-- [ ] data/delta_length_byte_array.parquet (Boolean EOF in some columns)
-- [ ] data/dict-page-offset-zero.parquet (Boolean EOF)
+- [ ] data/datapage_v2.snappy.parquet (Snappy decompression)
+- [ ] data/datapage_v2_empty_datapage.snappy.parquet (Snappy decompression)
+- [ ] data/delta_binary_packed.parquet (DELTA_BINARY_PACKED)
+- [ ] data/delta_byte_array.parquet (DELTA_BYTE_ARRAY)
+- [ ] data/delta_encoding_optional_column.parquet (DELTA_BINARY_PACKED)
+- [ ] data/delta_encoding_required_column.parquet (DELTA_BINARY_PACKED)
+- [ ] data/delta_length_byte_array.parquet (ZSTD)
+- [ ] data/dict-page-offset-zero.parquet (Unknown encoding)
 - [ ] data/fixed_length_byte_array.parquet (FIXED_LEN_BYTE_ARRAY)
 - [ ] data/fixed_length_decimal.parquet (FIXED_LEN_BYTE_ARRAY)
 - [ ] data/fixed_length_decimal_legacy.parquet (FIXED_LEN_BYTE_ARRAY)
-- [ ] data/float16_nonzeros_and_nans.parquet (Boolean EOF)
-- [ ] data/float16_zeros_and_nans.parquet (Boolean EOF)
+- [ ] data/float16_nonzeros_and_nans.parquet (FIXED_LEN_BYTE_ARRAY)
+- [ ] data/float16_zeros_and_nans.parquet (FIXED_LEN_BYTE_ARRAY)
 - [x] data/geospatial/crs-arbitrary-value.parquet
 - [x] data/geospatial/crs-default.parquet
 - [x] data/geospatial/crs-geography.parquet
@@ -423,11 +423,11 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 - [ ] data/lz4_raw_compressed.parquet (LZ4_RAW)
 - [ ] data/lz4_raw_compressed_larger.parquet (LZ4_RAW)
 - [x] data/map_no_value.parquet
-- [ ] data/nan_in_stats.parquet (NegativeArraySize)
+- [x] data/nan_in_stats.parquet
 - [x] data/nation.dict-malformed.parquet
 - [x] data/nested_lists.snappy.parquet
 - [x] data/nested_maps.snappy.parquet
-- [ ] data/nested_structs.rust.parquet (Boolean EOF)
+- [ ] data/nested_structs.rust.parquet (ZSTD)
 - [ ] data/non_hadoop_lz4_compressed.parquet (LZ4)
 - [x] data/nonnullable.impala.parquet
 - [x] data/null_list.parquet
@@ -435,179 +435,176 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 - [x] data/nulls.snappy.parquet
 - [x] data/old_list_structure.parquet
 - [x] data/overflow_i16_page_cnt.parquet
-- [ ] data/page_v2_empty_compressed.parquet (DATA_PAGE_V2)
+- [ ] data/page_v2_empty_compressed.parquet (ZSTD)
 - [x] data/plain-dict-uncompressed-checksum.parquet
 - [x] data/repeated_no_annotation.parquet
 - [x] data/repeated_primitive_no_list.parquet
-- [ ] data/rle-dict-snappy-checksum.parquet (Boolean EOF)
-- [ ] data/rle-dict-uncompressed-corrupt-checksum.parquet (Boolean EOF)
-- [ ] data/rle_boolean_encoding.parquet (Boolean EOF)
+- [x] data/rle-dict-snappy-checksum.parquet
+- [x] data/rle-dict-uncompressed-corrupt-checksum.parquet
+- [ ] data/rle_boolean_encoding.parquet (GZIP)
 - [x] data/single_nan.parquet
 - [x] data/sort_columns.parquet
 - [x] data/unknown-logical-type.parquet
 
 #### Shredded Variant Files (Nested Structure Tests)
-- [ ] shredded_variant/case-001.parquet
-- [ ] shredded_variant/case-002.parquet
-- [ ] shredded_variant/case-004.parquet
-- [ ] shredded_variant/case-005.parquet
-- [ ] shredded_variant/case-006.parquet
-- [ ] shredded_variant/case-007.parquet
-- [ ] shredded_variant/case-008.parquet
-- [ ] shredded_variant/case-009.parquet
-- [ ] shredded_variant/case-010.parquet
-- [ ] shredded_variant/case-011.parquet
-- [ ] shredded_variant/case-012.parquet
-- [ ] shredded_variant/case-013.parquet
-- [ ] shredded_variant/case-014.parquet
-- [ ] shredded_variant/case-015.parquet
-- [ ] shredded_variant/case-016.parquet
-- [ ] shredded_variant/case-017.parquet
-- [ ] shredded_variant/case-018.parquet
-- [ ] shredded_variant/case-019.parquet
-- [ ] shredded_variant/case-020.parquet
-- [ ] shredded_variant/case-021.parquet
-- [ ] shredded_variant/case-022.parquet
-- [ ] shredded_variant/case-023.parquet
-- [ ] shredded_variant/case-024.parquet
-- [ ] shredded_variant/case-025.parquet
-- [ ] shredded_variant/case-026.parquet
-- [ ] shredded_variant/case-027.parquet
-- [ ] shredded_variant/case-028.parquet
-- [ ] shredded_variant/case-029.parquet
-- [ ] shredded_variant/case-030.parquet
-- [ ] shredded_variant/case-031.parquet
-- [ ] shredded_variant/case-032.parquet
-- [ ] shredded_variant/case-033.parquet
-- [ ] shredded_variant/case-034.parquet
-- [ ] shredded_variant/case-035.parquet
-- [ ] shredded_variant/case-036.parquet
-- [ ] shredded_variant/case-037.parquet
-- [ ] shredded_variant/case-038.parquet
-- [ ] shredded_variant/case-039.parquet
-- [ ] shredded_variant/case-040.parquet
-- [ ] shredded_variant/case-041.parquet
-- [ ] shredded_variant/case-042.parquet
-- [ ] shredded_variant/case-043-INVALID.parquet
-- [ ] shredded_variant/case-044.parquet
-- [ ] shredded_variant/case-045.parquet
-- [ ] shredded_variant/case-046.parquet
-- [ ] shredded_variant/case-047.parquet
-- [ ] shredded_variant/case-048.parquet
-- [ ] shredded_variant/case-049.parquet
-- [ ] shredded_variant/case-050.parquet
-- [ ] shredded_variant/case-051.parquet
-- [ ] shredded_variant/case-052.parquet
-- [ ] shredded_variant/case-053.parquet
-- [ ] shredded_variant/case-054.parquet
-- [ ] shredded_variant/case-055.parquet
-- [ ] shredded_variant/case-056.parquet
-- [ ] shredded_variant/case-057.parquet
-- [ ] shredded_variant/case-058.parquet
-- [ ] shredded_variant/case-059.parquet
-- [ ] shredded_variant/case-060.parquet
-- [ ] shredded_variant/case-061.parquet
-- [ ] shredded_variant/case-062.parquet
-- [ ] shredded_variant/case-063.parquet
-- [ ] shredded_variant/case-064.parquet
-- [ ] shredded_variant/case-065.parquet
-- [ ] shredded_variant/case-066.parquet
-- [ ] shredded_variant/case-067.parquet
-- [ ] shredded_variant/case-068.parquet
-- [ ] shredded_variant/case-069.parquet
-- [ ] shredded_variant/case-070.parquet
-- [ ] shredded_variant/case-071.parquet
-- [ ] shredded_variant/case-072.parquet
-- [ ] shredded_variant/case-073.parquet
-- [ ] shredded_variant/case-074.parquet
-- [ ] shredded_variant/case-075.parquet
-- [ ] shredded_variant/case-076.parquet
-- [ ] shredded_variant/case-077.parquet
-- [ ] shredded_variant/case-078.parquet
-- [ ] shredded_variant/case-079.parquet
-- [ ] shredded_variant/case-080.parquet
-- [ ] shredded_variant/case-081.parquet
-- [ ] shredded_variant/case-082.parquet
-- [ ] shredded_variant/case-083.parquet
-- [ ] shredded_variant/case-084-INVALID.parquet
-- [ ] shredded_variant/case-085.parquet
-- [ ] shredded_variant/case-086.parquet
-- [ ] shredded_variant/case-087.parquet
-- [ ] shredded_variant/case-088.parquet
-- [ ] shredded_variant/case-089.parquet
-- [ ] shredded_variant/case-090.parquet
-- [ ] shredded_variant/case-091.parquet
-- [ ] shredded_variant/case-092.parquet
-- [ ] shredded_variant/case-093.parquet
-- [ ] shredded_variant/case-094.parquet
-- [ ] shredded_variant/case-095.parquet
-- [ ] shredded_variant/case-096.parquet
-- [ ] shredded_variant/case-097.parquet
-- [ ] shredded_variant/case-098.parquet
-- [ ] shredded_variant/case-099.parquet
-- [ ] shredded_variant/case-100.parquet
-- [ ] shredded_variant/case-101.parquet
-- [ ] shredded_variant/case-102.parquet
-- [ ] shredded_variant/case-103.parquet
-- [ ] shredded_variant/case-104.parquet
-- [ ] shredded_variant/case-105.parquet
-- [ ] shredded_variant/case-106.parquet
-- [ ] shredded_variant/case-107.parquet
-- [ ] shredded_variant/case-108.parquet
-- [ ] shredded_variant/case-109.parquet
-- [ ] shredded_variant/case-110.parquet
-- [ ] shredded_variant/case-111.parquet
-- [ ] shredded_variant/case-112.parquet
-- [ ] shredded_variant/case-113.parquet
-- [ ] shredded_variant/case-114.parquet
-- [ ] shredded_variant/case-115.parquet
-- [ ] shredded_variant/case-116.parquet
-- [ ] shredded_variant/case-117.parquet
-- [ ] shredded_variant/case-118.parquet
-- [ ] shredded_variant/case-119.parquet
-- [ ] shredded_variant/case-120.parquet
-- [ ] shredded_variant/case-121.parquet
-- [ ] shredded_variant/case-122.parquet
-- [ ] shredded_variant/case-123.parquet
-- [ ] shredded_variant/case-124.parquet
-- [ ] shredded_variant/case-125-INVALID.parquet
-- [ ] shredded_variant/case-126.parquet
-- [ ] shredded_variant/case-127.parquet
-- [ ] shredded_variant/case-128.parquet
-- [ ] shredded_variant/case-129.parquet
-- [ ] shredded_variant/case-130.parquet
-- [ ] shredded_variant/case-131.parquet
-- [ ] shredded_variant/case-132.parquet
-- [ ] shredded_variant/case-133.parquet
-- [ ] shredded_variant/case-134.parquet
-- [ ] shredded_variant/case-135.parquet
-- [ ] shredded_variant/case-136.parquet
-- [ ] shredded_variant/case-137.parquet
-- [ ] shredded_variant/case-138.parquet
+- [x] shredded_variant/case-001.parquet
+- [x] shredded_variant/case-002.parquet
+- [x] shredded_variant/case-004.parquet
+- [x] shredded_variant/case-005.parquet
+- [x] shredded_variant/case-006.parquet
+- [x] shredded_variant/case-007.parquet
+- [x] shredded_variant/case-008.parquet
+- [x] shredded_variant/case-009.parquet
+- [x] shredded_variant/case-010.parquet
+- [x] shredded_variant/case-011.parquet
+- [x] shredded_variant/case-012.parquet
+- [x] shredded_variant/case-013.parquet
+- [x] shredded_variant/case-014.parquet
+- [x] shredded_variant/case-015.parquet
+- [x] shredded_variant/case-016.parquet
+- [x] shredded_variant/case-017.parquet
+- [x] shredded_variant/case-018.parquet
+- [x] shredded_variant/case-019.parquet
+- [x] shredded_variant/case-020.parquet
+- [x] shredded_variant/case-021.parquet
+- [x] shredded_variant/case-022.parquet
+- [x] shredded_variant/case-023.parquet
+- [x] shredded_variant/case-024.parquet
+- [x] shredded_variant/case-025.parquet
+- [x] shredded_variant/case-026.parquet
+- [x] shredded_variant/case-027.parquet
+- [x] shredded_variant/case-028.parquet
+- [x] shredded_variant/case-029.parquet
+- [x] shredded_variant/case-030.parquet
+- [x] shredded_variant/case-031.parquet
+- [x] shredded_variant/case-032.parquet
+- [x] shredded_variant/case-033.parquet
+- [x] shredded_variant/case-034.parquet
+- [x] shredded_variant/case-035.parquet
+- [x] shredded_variant/case-036.parquet
+- [x] shredded_variant/case-037.parquet
+- [x] shredded_variant/case-038.parquet
+- [x] shredded_variant/case-039.parquet
+- [x] shredded_variant/case-040.parquet
+- [x] shredded_variant/case-041.parquet
+- [x] shredded_variant/case-042.parquet
+- [x] shredded_variant/case-043-INVALID.parquet
+- [x] shredded_variant/case-044.parquet
+- [x] shredded_variant/case-045.parquet
+- [x] shredded_variant/case-046.parquet
+- [x] shredded_variant/case-047.parquet
+- [x] shredded_variant/case-048.parquet
+- [x] shredded_variant/case-049.parquet
+- [x] shredded_variant/case-050.parquet
+- [x] shredded_variant/case-051.parquet
+- [x] shredded_variant/case-052.parquet
+- [x] shredded_variant/case-053.parquet
+- [x] shredded_variant/case-054.parquet
+- [x] shredded_variant/case-055.parquet
+- [x] shredded_variant/case-056.parquet
+- [x] shredded_variant/case-057.parquet
+- [x] shredded_variant/case-058.parquet
+- [x] shredded_variant/case-059.parquet
+- [x] shredded_variant/case-060.parquet
+- [x] shredded_variant/case-061.parquet
+- [x] shredded_variant/case-062.parquet
+- [x] shredded_variant/case-063.parquet
+- [x] shredded_variant/case-064.parquet
+- [x] shredded_variant/case-065.parquet
+- [x] shredded_variant/case-066.parquet
+- [x] shredded_variant/case-067.parquet
+- [x] shredded_variant/case-068.parquet
+- [x] shredded_variant/case-069.parquet
+- [x] shredded_variant/case-070.parquet
+- [x] shredded_variant/case-071.parquet
+- [x] shredded_variant/case-072.parquet
+- [x] shredded_variant/case-073.parquet
+- [x] shredded_variant/case-074.parquet
+- [x] shredded_variant/case-075.parquet
+- [x] shredded_variant/case-076.parquet
+- [x] shredded_variant/case-077.parquet
+- [x] shredded_variant/case-078.parquet
+- [x] shredded_variant/case-079.parquet
+- [x] shredded_variant/case-080.parquet
+- [x] shredded_variant/case-081.parquet
+- [x] shredded_variant/case-082.parquet
+- [x] shredded_variant/case-083.parquet
+- [x] shredded_variant/case-084-INVALID.parquet
+- [x] shredded_variant/case-085.parquet
+- [x] shredded_variant/case-086.parquet
+- [x] shredded_variant/case-087.parquet
+- [x] shredded_variant/case-088.parquet
+- [x] shredded_variant/case-089.parquet
+- [x] shredded_variant/case-090.parquet
+- [x] shredded_variant/case-091.parquet
+- [x] shredded_variant/case-092.parquet
+- [x] shredded_variant/case-093.parquet
+- [x] shredded_variant/case-094.parquet
+- [x] shredded_variant/case-095.parquet
+- [x] shredded_variant/case-096.parquet
+- [x] shredded_variant/case-097.parquet
+- [x] shredded_variant/case-098.parquet
+- [x] shredded_variant/case-099.parquet
+- [x] shredded_variant/case-100.parquet
+- [x] shredded_variant/case-101.parquet
+- [x] shredded_variant/case-102.parquet
+- [x] shredded_variant/case-103.parquet
+- [x] shredded_variant/case-104.parquet
+- [x] shredded_variant/case-105.parquet
+- [x] shredded_variant/case-106.parquet
+- [x] shredded_variant/case-107.parquet
+- [x] shredded_variant/case-108.parquet
+- [x] shredded_variant/case-109.parquet
+- [x] shredded_variant/case-110.parquet
+- [x] shredded_variant/case-111.parquet
+- [x] shredded_variant/case-112.parquet
+- [x] shredded_variant/case-113.parquet
+- [x] shredded_variant/case-114.parquet
+- [x] shredded_variant/case-115.parquet
+- [x] shredded_variant/case-116.parquet
+- [x] shredded_variant/case-117.parquet
+- [x] shredded_variant/case-118.parquet
+- [x] shredded_variant/case-119.parquet
+- [x] shredded_variant/case-120.parquet
+- [x] shredded_variant/case-121.parquet
+- [x] shredded_variant/case-122.parquet
+- [x] shredded_variant/case-123.parquet
+- [x] shredded_variant/case-124.parquet
+- [x] shredded_variant/case-125-INVALID.parquet
+- [x] shredded_variant/case-126.parquet
+- [x] shredded_variant/case-127.parquet
+- [x] shredded_variant/case-128.parquet
+- [x] shredded_variant/case-129.parquet
+- [x] shredded_variant/case-130.parquet
+- [x] shredded_variant/case-131.parquet
+- [x] shredded_variant/case-132.parquet
+- [x] shredded_variant/case-133.parquet
+- [x] shredded_variant/case-134.parquet
+- [x] shredded_variant/case-135.parquet
+- [x] shredded_variant/case-136.parquet
+- [x] shredded_variant/case-137.parquet
+- [x] shredded_variant/case-138.parquet
 
 ### Test Summary
 
-**Current Pass Rate: 177/215 (82.3%)** - Reading ALL columns from ALL row groups
+**Current Pass Rate: 184/215 (85.6%)**
 
 Progress:
 - Started (first column only): 163/215 (75.8%)
 - After Dictionary Encoding (first column only): 187/220 (85.0%)
 - After fixing tests to read ALL columns: 177/215 (82.3%)
+- After fixing field ID bugs (ColumnMetaData): 178/215 (82.8%)
+- After boolean bit-packing fix: 182/215 (84.7%)
+- After DATA_PAGE_V2 support: 184/215 (85.6%)
 
-**Note:** Test was updated to read from ALL columns, not just first column. This exposed additional issues:
-- Boolean column reading issues (EOF errors)
-- Delta encoding issues in some files
-- Float16 handling issues
-
-Remaining Failures by Category (38 total):
-- Boolean EOF errors: ~15 files (alltypes_*, float16_*, rle_boolean, etc.)
-- Delta encoding issues: ~5 files (delta_*)
-- ZSTD compression: ~3 files
-- GZIP compression: ~3 files
-- LZ4/LZ4_RAW compression: ~5 files
-- DATA_PAGE_V2: ~3 files
-- FIXED_LEN_BYTE_ARRAY: ~3 files
-- Other issues: ~1 file
+Remaining Failures by Category (31 total):
+- ZSTD compression: 5 files
+- FIXED_LEN_BYTE_ARRAY type length: 5 files
+- GZIP compression: 4 files
+- Delta encoding issues: 4 files (DELTA_BINARY_PACKED, DELTA_BYTE_ARRAY)
+- LZ4/LZ4_RAW compression: 5 files
+- Snappy decompression failures: 2 files
+- Other edge cases: 6 files (malformed data, unknown types, etc.)
 
 ### Test Categories
 - [ ] Round-trip tests (write → read → compare)
