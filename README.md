@@ -361,7 +361,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 - [x] GZIP (java.util.zip, no external dependency)
 - [x] SNAPPY (snappy-java)
 - [ ] LZ4 (lz4-java)
-- [ ] ZSTD (zstd-jni)
+- [x] ZSTD (zstd-jni)
 - [ ] LZO (lzo-java, optional)
 - [ ] BROTLI (brotli4j, optional)
 
@@ -464,7 +464,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 ### Milestone 4: Compression ✓
 - [x] GZIP integration
 - [x] Snappy integration
-- [ ] ZSTD integration
+- [x] ZSTD integration
 - [ ] LZ4 integration
 - [x] **Validate**: Read files with various codecs from parquet-testing
 
@@ -502,7 +502,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 
 ### Test Summary
 
-**Current Pass Rate: 189/215 (87.9%)**
+**Current Pass Rate: 190/215 (88.4%)**
 
 Progress:
 - Started (first column only): 163/215 (75.8%)
@@ -513,14 +513,15 @@ Progress:
 - After DATA_PAGE_V2 support: 184/215 (85.6%)
 - After FIXED_LEN_BYTE_ARRAY support: 188/215 (87.4%)
 - After GZIP compression support: 189/215 (87.9%)
+- After ZSTD compression support: 190/215 (88.4%)
 
-Remaining Failures by Category (26 total):
-- ZSTD compression: 5 files
+Remaining Failures by Category (25 total):
+- ZSTD compression: 3 files (edge cases with unusual frame descriptors)
 - LZ4 compression: 3 files
 - LZ4_RAW compression: 2 files
 - Special GZIP formats: 2 files (concatenated members, non-standard variant)
 - Delta encoding issues: 4 files (DELTA_BINARY_PACKED, DELTA_BYTE_ARRAY)
-- BYTE_STREAM_SPLIT encoding: 1 file
+- BYTE_STREAM_SPLIT encoding: 2 files
 - Snappy decompression failures: 2 files
 - Other edge cases: 7 files (EOF errors, malformed data, unknown types, etc.)
 

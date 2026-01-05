@@ -17,7 +17,14 @@
       "WebFetch(domain:github.com)",
       "Bash(comm:*)",
       "Bash(./mvnw compile:*)",
-      "Bash(javac:*)"
+      "Bash(javac:*)",
+      "Bash(timeout 30 ./mvnw exec:java:*)",
+      "Bash(timeout 60 ./mvnw exec:java:*)",
+      "Bash(timeout 30 ./mvnw test:*)",
+      "Bash(timeout 10 ./mvnw exec:java:*)",
+      "Bash(./mvnw exec:java:*)",
+      "Bash(.docker-venv/bin/python3:*)",
+      "WebSearch"
     ]
   }
 }

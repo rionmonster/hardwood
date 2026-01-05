@@ -171,10 +171,11 @@ public class PageReader {
                 throw new IOException("Dictionary page not found for RLE_DICTIONARY encoding");
             }
 
-            int bitWidth = getBitWidth(dictionary.length - 1);
-
-            // Read 1-byte length prefix (dictionary indices format for Data Page V1)
-            dataStream.read();
+            // For DATA_PAGE, dictionary indices start with 1-byte bit-width
+            int bitWidth = dataStream.read();
+            if (bitWidth < 0) {
+                throw new IOException("Failed to read bit width for dictionary indices");
+            }
 
             // Read the RLE/Bit-Packing Hybrid encoded indices
             byte[] indicesData = new byte[dataStream.available()];
