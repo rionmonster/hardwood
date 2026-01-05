@@ -141,7 +141,7 @@ public class PageReader {
         if (header.encoding() == Encoding.PLAIN) {
             // Read only the non-null values
             Object[] encodedValues = new Object[numNonNullValues];
-            PlainDecoder decoder = new PlainDecoder(dataStream, column.type());
+            PlainDecoder decoder = new PlainDecoder(dataStream, column.type(), column.typeLength());
             decoder.readValues(encodedValues, 0, numNonNullValues);
 
             // Map encoded values to output array using definition levels
@@ -238,7 +238,7 @@ public class PageReader {
         if (header.encoding() == Encoding.PLAIN) {
             // Read only the non-null values
             Object[] encodedValues = new Object[numNonNullValues];
-            PlainDecoder decoder = new PlainDecoder(dataStream, column.type());
+            PlainDecoder decoder = new PlainDecoder(dataStream, column.type(), column.typeLength());
             decoder.readValues(encodedValues, 0, numNonNullValues);
 
             // Map encoded values to output array using definition levels
@@ -312,7 +312,7 @@ public class PageReader {
 
         // Read all dictionary values (both PLAIN and PLAIN_DICTIONARY use plain encoding for dictionary)
         dictionary = new Object[header.numValues()];
-        PlainDecoder decoder = new PlainDecoder(dataStream, column.type());
+        PlainDecoder decoder = new PlainDecoder(dataStream, column.type(), column.typeLength());
         decoder.readValues(dictionary, 0, header.numValues());
     }
 

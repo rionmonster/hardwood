@@ -22,14 +22,16 @@ public class PlainDecoder {
 
     private final InputStream input;
     private final PhysicalType type;
+    private final Integer typeLength;
 
     // For bit-packed boolean reading
     private int currentByte = 0;
     private int bitPosition = 8; // 8 means we need to read a new byte
 
-    public PlainDecoder(InputStream input, PhysicalType type) {
+    public PlainDecoder(InputStream input, PhysicalType type, Integer typeLength) {
         this.input = input;
         this.type = type;
+        this.typeLength = typeLength;
     }
 
     /**
@@ -44,8 +46,12 @@ public class PlainDecoder {
             case FLOAT -> readFloat();
             case DOUBLE -> readDouble();
             case BYTE_ARRAY -> readByteArray();
-            case FIXED_LEN_BYTE_ARRAY -> throw new UnsupportedOperationException(
-                    "FIXED_LEN_BYTE_ARRAY requires type length");
+            case FIXED_LEN_BYTE_ARRAY -> {
+                if (typeLength == null) {
+                    throw new IOException("FIXED_LEN_BYTE_ARRAY requires type_length in schema");
+                }
+                yield readFixedLenByteArray(typeLength);
+            }
         };
     }
 

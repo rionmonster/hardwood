@@ -399,11 +399,11 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 - [ ] data/delta_encoding_required_column.parquet (DELTA_BINARY_PACKED)
 - [ ] data/delta_length_byte_array.parquet (ZSTD)
 - [ ] data/dict-page-offset-zero.parquet (Unknown encoding)
-- [ ] data/fixed_length_byte_array.parquet (FIXED_LEN_BYTE_ARRAY)
-- [ ] data/fixed_length_decimal.parquet (FIXED_LEN_BYTE_ARRAY)
-- [ ] data/fixed_length_decimal_legacy.parquet (FIXED_LEN_BYTE_ARRAY)
-- [ ] data/float16_nonzeros_and_nans.parquet (FIXED_LEN_BYTE_ARRAY)
-- [ ] data/float16_zeros_and_nans.parquet (FIXED_LEN_BYTE_ARRAY)
+- [ ] data/fixed_length_byte_array.parquet (EOF error)
+- [x] data/fixed_length_decimal.parquet
+- [x] data/fixed_length_decimal_legacy.parquet
+- [x] data/float16_nonzeros_and_nans.parquet
+- [x] data/float16_zeros_and_nans.parquet
 - [x] data/geospatial/crs-arbitrary-value.parquet
 - [x] data/geospatial/crs-default.parquet
 - [x] data/geospatial/crs-geography.parquet
@@ -587,7 +587,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 
 ### Test Summary
 
-**Current Pass Rate: 184/215 (85.6%)**
+**Current Pass Rate: 188/215 (87.4%)**
 
 Progress:
 - Started (first column only): 163/215 (75.8%)
@@ -596,15 +596,16 @@ Progress:
 - After fixing field ID bugs (ColumnMetaData): 178/215 (82.8%)
 - After boolean bit-packing fix: 182/215 (84.7%)
 - After DATA_PAGE_V2 support: 184/215 (85.6%)
+- After FIXED_LEN_BYTE_ARRAY support: 188/215 (87.4%)
 
-Remaining Failures by Category (31 total):
+Remaining Failures by Category (27 total):
 - ZSTD compression: 5 files
-- FIXED_LEN_BYTE_ARRAY type length: 5 files
 - GZIP compression: 4 files
+- LZ4 compression: 3 files
+- LZ4_RAW compression: 2 files
 - Delta encoding issues: 4 files (DELTA_BINARY_PACKED, DELTA_BYTE_ARRAY)
-- LZ4/LZ4_RAW compression: 5 files
 - Snappy decompression failures: 2 files
-- Other edge cases: 6 files (malformed data, unknown types, etc.)
+- Other edge cases: 7 files (EOF errors, malformed data, unknown types, etc.)
 
 ### Test Categories
 - [ ] Round-trip tests (write → read → compare)
