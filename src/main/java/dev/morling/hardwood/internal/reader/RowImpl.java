@@ -5,21 +5,22 @@
  *
  * Licensed under the Apache Software License version 2.0, available at http://www.apache.org/licenses/LICENSE-2.0
  */
-package dev.morling.hardwood.row;
+package dev.morling.hardwood.internal.reader;
 
 import java.nio.charset.StandardCharsets;
 
+import dev.morling.hardwood.row.Row;
 import dev.morling.hardwood.schema.FileSchema;
 
 /**
  * Implementation of Row interface backed by an Object array.
  */
-class RowImpl implements Row {
+public class RowImpl implements Row {
 
     private final Object[] values;
     private final FileSchema schema;
 
-    RowImpl(Object[] values, FileSchema schema) {
+    public RowImpl(Object[] values, FileSchema schema) {
         this.values = values;
         this.schema = schema;
     }

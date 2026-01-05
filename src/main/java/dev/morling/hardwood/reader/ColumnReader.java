@@ -12,10 +12,10 @@ import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.List;
 
+import dev.morling.hardwood.internal.reader.ColumnBatch;
 import dev.morling.hardwood.internal.reader.PageReader;
 import dev.morling.hardwood.metadata.ColumnChunk;
 import dev.morling.hardwood.metadata.ColumnMetaData;
-import dev.morling.hardwood.row.ColumnBatch;
 import dev.morling.hardwood.schema.ColumnSchema;
 
 /**
@@ -110,7 +110,7 @@ public class ColumnReader {
      * Read a batch of values from this column.
      * Returns up to batchSize values, or fewer if end of column is reached.
      */
-    public ColumnBatch readBatch(int batchSize) throws IOException {
+    ColumnBatch readBatch(int batchSize) throws IOException {
         Object[] values = new Object[batchSize];
         int count = 0;
 

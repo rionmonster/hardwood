@@ -14,6 +14,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import dev.morling.hardwood.internal.thrift.FileMetaDataReader;
 import dev.morling.hardwood.internal.thrift.ThriftCompactReader;
@@ -34,10 +37,13 @@ public class ParquetFileReader implements AutoCloseable {
 
     private final RandomAccessFile file;
     private final FileMetaData fileMetaData;
+    private final ExecutorService executorService;
 
     private ParquetFileReader(RandomAccessFile file, FileMetaData fileMetaData) {
         this.file = file;
         this.fileMetaData = fileMetaData;
+        // Create executor with thread count = available processors
+        this.executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
     }
 
     public static ParquetFileReader open(Path path) throws IOException {
@@ -110,8 +116,31 @@ public class ParquetFileReader implements AutoCloseable {
         return new ColumnReader(file, idColumn, idColumnChunk);
     }
 
+    /**
+     * Create a RowReader that iterates over all rows in all row groups.
+     * The reader uses parallel batch fetching for performance.
+     */
+    public RowReader createRowReader() {
+        FileSchema schema = getFileSchema();
+        long totalRows = fileMetaData.numRows();
+        return new RowReader(schema, file, fileMetaData.rowGroups(), executorService, totalRows);
+    }
+
     @Override
     public void close() throws IOException {
+        // Shutdown executor service
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
+            }
+        }
+        catch (InterruptedException e) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
+        // Close file
         file.close();
     }
 }

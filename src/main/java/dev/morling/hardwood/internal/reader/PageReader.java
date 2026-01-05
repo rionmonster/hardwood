@@ -58,20 +58,25 @@ public class PageReader {
             return null;
         }
 
-        // Seek to page position
-        file.seek(currentOffset);
+        // Synchronize on file to prevent concurrent access from multiple column readers
+        PageHeader pageHeader;
+        byte[] pageData;
+        synchronized (file) {
+            // Seek to page position
+            file.seek(currentOffset);
 
-        // Read page header using a tracking input stream
-        RandomAccessFileInputStream headerStream = new RandomAccessFileInputStream(file);
-        ThriftCompactReader headerReader = new ThriftCompactReader(headerStream);
-        PageHeader pageHeader = PageHeaderReader.read(headerReader);
+            // Read page header using a tracking input stream
+            RandomAccessFileInputStream headerStream = new RandomAccessFileInputStream(file);
+            ThriftCompactReader headerReader = new ThriftCompactReader(headerStream);
+            pageHeader = PageHeaderReader.read(headerReader);
 
-        // Read page data
-        byte[] pageData = new byte[pageHeader.compressedPageSize()];
-        file.readFully(pageData);
+            // Read page data
+            pageData = new byte[pageHeader.compressedPageSize()];
+            file.readFully(pageData);
 
-        // Update offset for next page
-        currentOffset = file.getFilePointer();
+            // Update offset for next page
+            currentOffset = file.getFilePointer();
+        }
 
         // Decompress page data
         Decompressor decompressor = DecompressorFactory.getDecompressor(columnMetaData.codec());
