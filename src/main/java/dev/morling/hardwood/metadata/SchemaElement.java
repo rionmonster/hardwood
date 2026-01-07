@@ -17,6 +17,8 @@ public record SchemaElement(
         RepetitionType repetitionType,
         Integer numChildren,
         ConvertedType convertedType,
+        Integer scale,
+        Integer precision,
         Integer fieldId,
         LogicalType logicalType) {
 

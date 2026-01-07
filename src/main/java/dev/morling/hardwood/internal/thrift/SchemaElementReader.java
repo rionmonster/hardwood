@@ -37,6 +37,8 @@ public class SchemaElementReader {
         RepetitionType repetitionType = null;
         Integer numChildren = null;
         ConvertedType convertedType = null;
+        Integer scale = null;
+        Integer precision = null;
         Integer fieldId = null;
         LogicalType logicalType = null;
 
@@ -95,17 +97,33 @@ public class SchemaElementReader {
                         reader.skipField(header.type());
                     }
                     break;
-                case 10: // logicalType (optional)
-                    if (header.type() == 0x0C) { // STRUCT
-                        logicalType = LogicalTypeReader.read(reader);
+                case 7: // scale (optional) - for legacy DECIMAL support
+                    if (header.type() == 0x05) {
+                        scale = reader.readI32();
                     }
                     else {
                         reader.skipField(header.type());
                     }
                     break;
-                case 16: // field_id (optional)
+                case 8: // precision (optional) - for legacy DECIMAL support
+                    if (header.type() == 0x05) {
+                        precision = reader.readI32();
+                    }
+                    else {
+                        reader.skipField(header.type());
+                    }
+                    break;
+                case 9: // field_id (optional)
                     if (header.type() == 0x05) {
                         fieldId = reader.readI32();
+                    }
+                    else {
+                        reader.skipField(header.type());
+                    }
+                    break;
+                case 10: // logicalType (optional)
+                    if (header.type() == 0x0C) { // STRUCT
+                        logicalType = LogicalTypeReader.read(reader);
                     }
                     else {
                         reader.skipField(header.type());
@@ -117,6 +135,6 @@ public class SchemaElementReader {
             }
         }
 
-        return new SchemaElement(name, type, typeLength, repetitionType, numChildren, convertedType, fieldId, logicalType);
+        return new SchemaElement(name, type, typeLength, repetitionType, numChildren, convertedType, scale, precision, fieldId, logicalType);
     }
 }
