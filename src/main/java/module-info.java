@@ -8,8 +8,8 @@
 module dev.morling.hardwood {
     requires snappy.java;
     requires com.github.luben.zstd_jni;
+    exports dev.morling.hardwood.row;
     exports dev.morling.hardwood.metadata;
     exports dev.morling.hardwood.reader;
-    exports dev.morling.hardwood.row;
     exports dev.morling.hardwood.schema;
 }

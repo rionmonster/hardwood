@@ -39,7 +39,8 @@
       "Bash(/tmp/CheckAllTypes.java <<'EOF'\npackage dev.morling.hardwood;\n\nimport java.nio.file.Paths;\nimport dev.morling.hardwood.reader.ParquetFileReader;\n\npublic class CheckAllTypes {\n    public static void main\\(String[] args\\) throws Exception {\n        try \\(var reader = ParquetFileReader.open\\(Paths.get\\(\"src/test/resources/logical_types_test.parquet\"\\)\\)\\) {\n            System.out.println\\(\"Column count: \" + reader.getFileSchema\\(\\).getColumnCount\\(\\)\\);\n            System.out.println\\(\"\\\\nAll columns:\"\\);\n            for \\(int i = 0; i < reader.getFileSchema\\(\\).getColumnCount\\(\\); i++\\) {\n                var col = reader.getFileSchema\\(\\).getColumn\\(i\\);\n                System.out.println\\(\"  \" + i + \": \" + col.name\\(\\) + \" - \" + col.type\\(\\) + \" - \" + col.logicalType\\(\\)\\);\n            }\n        }\n    }\n}\nEOF)",
       "Bash(.docker-venv/bin/pip show:*)",
       "Bash(.docker-venv/bin/pip:*)",
-      "Bash(.docker-venv/bin/pip install:*)"
+      "Bash(.docker-venv/bin/pip install:*)",
+      "Bash(./mvnw:*)"
     ]
   }
 }

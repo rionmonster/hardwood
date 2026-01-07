@@ -18,11 +18,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import dev.morling.hardwood.internal.reader.ColumnBatch;
+import dev.morling.hardwood.internal.reader.PqRowImpl;
 import dev.morling.hardwood.internal.reader.RecordAssembler;
-import dev.morling.hardwood.internal.reader.RowImpl;
 import dev.morling.hardwood.internal.reader.SimpleColumnBatch;
 import dev.morling.hardwood.metadata.RowGroup;
-import dev.morling.hardwood.row.Row;
+import dev.morling.hardwood.row.PqRow;
 import dev.morling.hardwood.schema.FileSchema;
 import dev.morling.hardwood.schema.SchemaNode;
 
@@ -31,7 +31,7 @@ import dev.morling.hardwood.schema.SchemaNode;
  * Internally uses parallel batch fetching from column readers for performance.
  * Supports reading across multiple row groups.
  */
-public class RowReader implements Iterable<Row>, AutoCloseable {
+public class RowReader implements Iterable<PqRow>, AutoCloseable {
 
     private static final int DEFAULT_BATCH_SIZE = 5000;
 
@@ -104,8 +104,8 @@ public class RowReader implements Iterable<Row>, AutoCloseable {
     }
 
     @Override
-    public Iterator<Row> iterator() {
-        return new RowIterator();
+    public Iterator<PqRow> iterator() {
+        return new PqRowIterator();
     }
 
     /**
@@ -181,9 +181,21 @@ public class RowReader implements Iterable<Row>, AutoCloseable {
     }
 
     /**
-     * Iterator implementation for row-by-row access.
+     * Check if schema has nested fields (structs or lists).
      */
-    private class RowIterator implements Iterator<Row> {
+    private boolean hasNestedFields() {
+        for (SchemaNode child : schema.getRootNode().children()) {
+            if (child instanceof SchemaNode.GroupNode) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Iterator implementation for type-safe PqRow access.
+     */
+    private class PqRowIterator implements Iterator<PqRow> {
 
         @Override
         public boolean hasNext() {
@@ -220,7 +232,7 @@ public class RowReader implements Iterable<Row>, AutoCloseable {
         }
 
         @Override
-        public Row next() {
+        public PqRow next() {
             if (!hasNext()) {
                 throw new NoSuchElementException("No more rows available");
             }
@@ -244,19 +256,7 @@ public class RowReader implements Iterable<Row>, AutoCloseable {
             currentBatchPosition++;
             totalRowsRead++;
 
-            return new RowImpl(rowValues, schema);
+            return new PqRowImpl(rowValues, schema);
         }
-    }
-
-    /**
-     * Check if schema has nested fields (structs or lists).
-     */
-    private boolean hasNestedFields() {
-        for (SchemaNode child : schema.getRootNode().children()) {
-            if (child instanceof SchemaNode.GroupNode) {
-                return true;
-            }
-        }
-        return false;
     }
 }

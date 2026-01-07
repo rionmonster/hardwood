@@ -16,86 +16,103 @@ In the future:
 
 ## Usage
 
-### Row-Oriented Reading (RowReader)
+### Row-Oriented Reading (PqRow API)
 
-The `RowReader` provides a convenient row-oriented interface for reading Parquet files. It handles parallel batch fetching from all columns and automatically processes all row groups.
+The `RowReader` provides a convenient row-oriented interface for reading Parquet files. The type-safe `PqRow` API uses `PqType<T>` tokens for compile-time type safety.
 
 ```java
 import dev.morling.hardwood.reader.ParquetFileReader;
-import dev.morling.hardwood.row.Row;
 import dev.morling.hardwood.reader.RowReader;
+import dev.morling.hardwood.api.PqRow;
+import dev.morling.hardwood.api.PqList;
+import dev.morling.hardwood.api.PqType;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.UUID;
 
 try (ParquetFileReader fileReader = ParquetFileReader.open(path)) {
     try (RowReader rowReader = fileReader.createRowReader()) {
-        for (Row row : rowReader) {
-            // Access columns by name with type-safe accessors
-            long id = row.getLong("id");
-            String name = row.getString("name");
+        for (PqRow row : rowReader) {
+            // Access columns by name with type-safe PqType tokens
+            long id = row.getValue(PqType.INT64, "id");
+            String name = row.getValue(PqType.STRING, "name");
 
             // Logical types are automatically converted
-            LocalDate birthDate = row.getDate("birth_date");        // DATE → LocalDate
-            Instant createdAt = row.getTimestamp("created_at");    // TIMESTAMP → Instant
-            BigDecimal balance = row.getDecimal("balance");        // DECIMAL → BigDecimal
+            LocalDate birthDate = row.getValue(PqType.DATE, "birth_date");
+            Instant createdAt = row.getValue(PqType.TIMESTAMP, "created_at");
+            LocalTime wakeTime = row.getValue(PqType.TIME, "wake_time");
+            BigDecimal balance = row.getValue(PqType.DECIMAL, "balance");
+            UUID accountId = row.getValue(PqType.UUID, "account_id");
 
             // Check for null values
             if (!row.isNull("age")) {
-                int age = row.getInt("age");
+                int age = row.getValue(PqType.INT32, "age");
                 System.out.println("ID: " + id + ", Name: " + name + ", Age: " + age);
-            } else {
-                System.out.println("ID: " + id + ", Name: " + name + ", Age: null");
             }
 
-            // Can also access by position or use generic getObject()
-            long idByIndex = row.getLong(0);
-            Object genericValue = row.getObject("created_at");  // Returns Instant for TIMESTAMP
+            // Can also access by position
+            long idByIndex = row.getValue(PqType.INT64, 0);
 
             // Access nested structs
-            Row address = row.getStruct("address");
+            PqRow address = row.getValue(PqType.ROW, "address");
             if (address != null) {
-                String city = address.getString("city");
-                int zip = address.getInt("zip");
+                String city = address.getValue(PqType.STRING, "city");
+                int zip = address.getValue(PqType.INT32, "zip");
             }
 
-            // Access lists
-            List<String> tags = row.getStringList("tags");
-            List<Row> contacts = row.getStructList("contacts");  // List of structs
+            // Access lists with type-safe element access
+            PqList tags = row.getValue(PqType.LIST, "tags");
+            if (tags != null) {
+                for (String tag : tags.getValues(PqType.STRING)) {
+                    System.out.println("Tag: " + tag);
+                }
+            }
 
-            // Access nested lists (list<list<T>>)
-            List<?> matrix = row.getList("matrix");  // Returns List<List<Integer>> for list<list<int>>
+            // Access list of structs
+            PqList contacts = row.getValue(PqType.LIST, "contacts");
+            if (contacts != null) {
+                for (PqRow contact : contacts.getValues(PqType.ROW)) {
+                    String contactName = contact.getValue(PqType.STRING, "name");
+                    String phone = contact.getValue(PqType.STRING, "phone");
+                }
+            }
+
+            // Access nested lists (list<list<int>>)
+            PqList matrix = row.getValue(PqType.LIST, "matrix");
+            if (matrix != null) {
+                for (PqList innerList : matrix.getValues(PqType.LIST)) {
+                    for (Integer val : innerList.getValues(PqType.INT32)) {
+                        System.out.println("Value: " + val);
+                    }
+                }
+            }
         }
     }
 }
 ```
 
-**Supported physical types:**
-- `getBoolean()` - BOOLEAN
-- `getInt()` - INT32
-- `getLong()` - INT64
-- `getFloat()` - FLOAT
-- `getDouble()` - DOUBLE
-- `getByteArray()` - BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY
-- `getString()` - BYTE_ARRAY with STRING logical type
+**Supported PqType tokens:**
 
-**Supported logical types (automatic conversion):**
-- `getString()` - STRING logical type → String
-- `getDate()` - DATE logical type → LocalDate
-- `getTimestamp()` - TIMESTAMP logical type → Instant
-- `getTime()` - TIME logical type → LocalTime
-- `getDecimal()` - DECIMAL logical type → BigDecimal
-- `getUuid()` - UUID logical type → UUID
-- `getInt()` / `getLong()` - INT_8/16/32/64, UINT_8/16/32/64 logical types → int/long
-- `getObject()` - Generic accessor with automatic logical type conversion
+| PqType | Physical/Logical Type | Java Type |
+|--------|----------------------|-----------|
+| `PqType.BOOLEAN` | BOOLEAN | `Boolean` |
+| `PqType.INT32` | INT32 | `Integer` |
+| `PqType.INT64` | INT64 | `Long` |
+| `PqType.FLOAT` | FLOAT | `Float` |
+| `PqType.DOUBLE` | DOUBLE | `Double` |
+| `PqType.BINARY` | BYTE_ARRAY | `byte[]` |
+| `PqType.STRING` | STRING logical type | `String` |
+| `PqType.DATE` | DATE logical type | `LocalDate` |
+| `PqType.TIME` | TIME logical type | `LocalTime` |
+| `PqType.TIMESTAMP` | TIMESTAMP logical type | `Instant` |
+| `PqType.DECIMAL` | DECIMAL logical type | `BigDecimal` |
+| `PqType.UUID` | UUID logical type | `UUID` |
+| `PqType.ROW` | Nested struct | `PqRow` |
+| `PqType.LIST` | LIST logical type | `PqList` |
 
-**Nested types:**
-- `getStruct()` - Nested struct → Row (recursive access)
-- `getIntList()`, `getLongList()`, `getStringList()` - List of primitives
-- `getStructList()` - List of structs → List<Row>
-- `getList()` - Generic list access for nested lists (list<list<T>>, etc.)
+**Type validation:** The API validates at runtime that the requested `PqType` matches the schema. Mismatches throw `IllegalArgumentException` with a descriptive message.
 
 ### Column-Oriented Reading (ColumnReader)
 
