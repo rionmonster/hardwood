@@ -14,6 +14,7 @@ import java.io.RandomAccessFile;
 
 import dev.morling.hardwood.internal.compression.Decompressor;
 import dev.morling.hardwood.internal.compression.DecompressorFactory;
+import dev.morling.hardwood.internal.encoding.ByteStreamSplitDecoder;
 import dev.morling.hardwood.internal.encoding.DeltaBinaryPackedDecoder;
 import dev.morling.hardwood.internal.encoding.DeltaByteArrayDecoder;
 import dev.morling.hardwood.internal.encoding.DeltaLengthByteArrayDecoder;
@@ -335,6 +336,15 @@ public class PageReader {
             case DELTA_BYTE_ARRAY -> {
                 encodedValues = new Object[numNonNullValues];
                 DeltaByteArrayDecoder decoder = new DeltaByteArrayDecoder(dataStream);
+                decoder.readValues(encodedValues, 0, numNonNullValues);
+                mapEncodedValues(encodedValues, values, definitionLevels);
+            }
+            case BYTE_STREAM_SPLIT -> {
+                // BYTE_STREAM_SPLIT needs all data upfront to compute stream offsets
+                byte[] allData = dataStream.readAllBytes();
+                encodedValues = new Object[numNonNullValues];
+                ByteStreamSplitDecoder decoder = new ByteStreamSplitDecoder(
+                        allData, numNonNullValues, column.type(), column.typeLength());
                 decoder.readValues(encodedValues, 0, numNonNullValues);
                 mapEncodedValues(encodedValues, values, definitionLevels);
             }

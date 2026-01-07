@@ -288,10 +288,11 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
   - [x] Decoder implementation
 
 #### 2.5 Byte Stream Split (BYTE_STREAM_SPLIT)
-- [ ] Float byte separation/interleaving
-- [ ] Double byte separation/interleaving
+- [x] Float byte separation/interleaving
+- [x] Double byte separation/interleaving
+- [x] FIXED_LEN_BYTE_ARRAY support
 - [ ] Encoder implementation
-- [ ] Decoder implementation
+- [x] Decoder implementation
 
 ---
 
@@ -580,8 +581,8 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 - [x] DELTA_BINARY_PACKED
 - [x] DELTA_LENGTH_BYTE_ARRAY
 - [x] DELTA_BYTE_ARRAY
-- [ ] BYTE_STREAM_SPLIT
-- [ ] **Validate**: Read files using these encodings
+- [x] BYTE_STREAM_SPLIT
+- [x] **Validate**: Read files using these encodings
 
 ### Milestone 6: Optimization Features
 - [ ] Statistics collection and usage
@@ -610,7 +611,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 
 ### Test Summary
 
-**Current Pass Rate: 202/215 (94.0%) parquet-testing, 29 unit tests**
+**Current Pass Rate: 204/215 (94.9%) parquet-testing, 29 unit tests**
 
 Progress:
 - Started (first column only): 163/215 (75.8%)
@@ -627,11 +628,11 @@ Progress:
 - After DELTA_BYTE_ARRAY: 193/215 (89.8%), 29 unit tests
 - After LZ4 compression: 198/215 (92.1%), 29 unit tests
 - After DATA_PAGE_V2 decompression fix + RLE boolean: 202/215 (94.0%), 29 unit tests
+- After BYTE_STREAM_SPLIT encoding: 204/215 (94.9%), 29 unit tests
 
-Remaining Failures by Category (13 total):
+Remaining Failures by Category (11 total):
 - Bad data files (intentionally malformed): 5 files
 - Snappy decompression (DATA_PAGE_V2): 2 files
-- BYTE_STREAM_SPLIT encoding: 2 files
 - Brotli compression: 1 file
 - Other edge cases: 3 files (dict-page-offset-zero, fixed_length_byte_array, case-046)
 
