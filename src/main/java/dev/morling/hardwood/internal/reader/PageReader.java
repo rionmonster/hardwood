@@ -14,6 +14,9 @@ import java.io.RandomAccessFile;
 
 import dev.morling.hardwood.internal.compression.Decompressor;
 import dev.morling.hardwood.internal.compression.DecompressorFactory;
+import dev.morling.hardwood.internal.encoding.DeltaBinaryPackedDecoder;
+import dev.morling.hardwood.internal.encoding.DeltaByteArrayDecoder;
+import dev.morling.hardwood.internal.encoding.DeltaLengthByteArrayDecoder;
 import dev.morling.hardwood.internal.encoding.PlainDecoder;
 import dev.morling.hardwood.internal.encoding.RleBitPackingHybridDecoder;
 import dev.morling.hardwood.internal.thrift.PageHeaderReader;
@@ -112,120 +115,29 @@ public class PageReader {
         // Read repetition levels
         int[] repetitionLevels = null;
         if (column.getMaxRepetitionLevel() > 0) {
-            byte[] lengthBytes = new byte[4];
-            dataStream.read(lengthBytes);
-            int repLevelLength = java.nio.ByteBuffer.wrap(lengthBytes)
-                    .order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt();
-
+            int repLevelLength = readLittleEndianInt(dataStream);
             byte[] repLevelData = new byte[repLevelLength];
             dataStream.read(repLevelData);
 
-            repetitionLevels = new int[header.numValues()];
-            RleBitPackingHybridDecoder repLevelDecoder = new RleBitPackingHybridDecoder(
-                    new ByteArrayInputStream(repLevelData),
-                    getBitWidth(column.getMaxRepetitionLevel()));
-            repLevelDecoder.readInts(repetitionLevels, 0, header.numValues());
+            repetitionLevels = decodeLevels(repLevelData, header.numValues(), column.getMaxRepetitionLevel());
         }
 
         // Read definition levels
         int[] definitionLevels = null;
         if (column.getMaxDefinitionLevel() > 0) {
-            // Read definition level length (4 bytes)
-            byte[] lengthBytes = new byte[4];
-            dataStream.read(lengthBytes);
-            int defLevelLength = java.nio.ByteBuffer.wrap(lengthBytes)
-                    .order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt();
-
-            // Read definition levels
+            int defLevelLength = readLittleEndianInt(dataStream);
             byte[] defLevelData = new byte[defLevelLength];
             dataStream.read(defLevelData);
 
-            definitionLevels = new int[header.numValues()];
-            RleBitPackingHybridDecoder defLevelDecoder = new RleBitPackingHybridDecoder(
-                    new ByteArrayInputStream(defLevelData),
-                    getBitWidth(column.getMaxDefinitionLevel()));
-            defLevelDecoder.readInts(definitionLevels, 0, header.numValues());
+            definitionLevels = decodeLevels(defLevelData, header.numValues(), column.getMaxDefinitionLevel());
         }
 
-        // Count non-null values to read from encoded data
-        int numNonNullValues = header.numValues();
-        if (definitionLevels != null) {
-            int maxDefLevel = column.getMaxDefinitionLevel();
-            numNonNullValues = 0;
-            for (int i = 0; i < header.numValues(); i++) {
-                if (definitionLevels[i] == maxDefLevel) {
-                    numNonNullValues++;
-                }
-            }
-        }
+        // Count non-null values
+        int numNonNullValues = countNonNullValues(header.numValues(), definitionLevels);
 
-        // Read values using appropriate encoding
-        Object[] values = new Object[header.numValues()];
-
-        if (header.encoding() == Encoding.PLAIN) {
-            // Read only the non-null values
-            Object[] encodedValues = new Object[numNonNullValues];
-            PlainDecoder decoder = new PlainDecoder(dataStream, column.type(), column.typeLength());
-            decoder.readValues(encodedValues, 0, numNonNullValues);
-
-            // Map encoded values to output array using definition levels
-            if (definitionLevels != null) {
-                int encodedIndex = 0;
-                int maxDefLevel = column.getMaxDefinitionLevel();
-                for (int i = 0; i < header.numValues(); i++) {
-                    if (definitionLevels[i] == maxDefLevel) {
-                        values[i] = encodedValues[encodedIndex++];
-                    }
-                    // else values[i] stays null
-                }
-            }
-            else {
-                System.arraycopy(encodedValues, 0, values, 0, numNonNullValues);
-            }
-        }
-        else if (header.encoding() == Encoding.RLE_DICTIONARY || header.encoding() == Encoding.PLAIN_DICTIONARY) {
-            // Decode dictionary indices
-            if (dictionary == null) {
-                throw new IOException("Dictionary page not found for RLE_DICTIONARY encoding");
-            }
-
-            // For DATA_PAGE, dictionary indices start with 1-byte bit-width
-            int bitWidth = dataStream.read();
-            if (bitWidth < 0) {
-                throw new IOException("Failed to read bit width for dictionary indices");
-            }
-
-            // Read the RLE/Bit-Packing Hybrid encoded indices
-            byte[] indicesData = new byte[dataStream.available()];
-            dataStream.read(indicesData);
-
-            RleBitPackingHybridDecoder indexDecoder = new RleBitPackingHybridDecoder(
-                    new ByteArrayInputStream(indicesData), bitWidth);
-
-            int[] indices = new int[numNonNullValues];
-            indexDecoder.readInts(indices, 0, numNonNullValues);
-
-            // Map indices to dictionary values, applying definition levels
-            if (definitionLevels != null) {
-                int encodedIndex = 0;
-                int maxDefLevel = column.getMaxDefinitionLevel();
-                for (int i = 0; i < header.numValues(); i++) {
-                    if (definitionLevels[i] == maxDefLevel) {
-                        values[i] = dictionary[indices[encodedIndex++]];
-                    }
-                    // else values[i] stays null
-                }
-            }
-            else {
-                for (int i = 0; i < numNonNullValues; i++) {
-                    values[i] = dictionary[indices[i]];
-                }
-            }
-        }
-        else {
-            throw new UnsupportedOperationException(
-                    "Encoding not yet supported: " + header.encoding());
-        }
+        // Decode values and map to output array
+        Object[] values = decodeAndMapValues(
+                header.encoding(), dataStream, header.numValues(), numNonNullValues, definitionLevels, true);
 
         return new Page(header.numValues(), definitionLevels, repetitionLevels, values);
     }
@@ -241,11 +153,7 @@ public class PageReader {
             byte[] repLevelData = new byte[header.repetitionLevelsByteLength()];
             dataStream.read(repLevelData);
 
-            repetitionLevels = new int[header.numValues()];
-            RleBitPackingHybridDecoder repLevelDecoder = new RleBitPackingHybridDecoder(
-                    new ByteArrayInputStream(repLevelData),
-                    getBitWidth(column.getMaxRepetitionLevel()));
-            repLevelDecoder.readInts(repetitionLevels, 0, header.numValues());
+            repetitionLevels = decodeLevels(repLevelData, header.numValues(), column.getMaxRepetitionLevel());
         }
         else if (header.repetitionLevelsByteLength() > 0) {
             // Skip if we have rep level data but maxRepLevel is 0
@@ -255,87 +163,157 @@ public class PageReader {
         // Read definition levels
         int[] definitionLevels = null;
         if (column.getMaxDefinitionLevel() > 0 && header.definitionLevelsByteLength() > 0) {
-            // In V2, the length is in the header - no 4-byte prefix
             byte[] defLevelData = new byte[header.definitionLevelsByteLength()];
             dataStream.read(defLevelData);
 
-            definitionLevels = new int[header.numValues()];
-            RleBitPackingHybridDecoder defLevelDecoder = new RleBitPackingHybridDecoder(
-                    new ByteArrayInputStream(defLevelData),
-                    getBitWidth(column.getMaxDefinitionLevel()));
-            defLevelDecoder.readInts(definitionLevels, 0, header.numValues());
+            definitionLevels = decodeLevels(defLevelData, header.numValues(), column.getMaxDefinitionLevel());
         }
 
-        // Calculate number of non-null values
         // In V2, we have numNulls directly available
         int numNonNullValues = header.numValues() - header.numNulls();
 
-        // Read values using appropriate encoding
-        Object[] values = new Object[header.numValues()];
-
-        if (header.encoding() == Encoding.PLAIN) {
-            // Read only the non-null values
-            Object[] encodedValues = new Object[numNonNullValues];
-            PlainDecoder decoder = new PlainDecoder(dataStream, column.type(), column.typeLength());
-            decoder.readValues(encodedValues, 0, numNonNullValues);
-
-            // Map encoded values to output array using definition levels
-            if (definitionLevels != null) {
-                int encodedIndex = 0;
-                int maxDefLevel = column.getMaxDefinitionLevel();
-                for (int i = 0; i < header.numValues(); i++) {
-                    if (definitionLevels[i] == maxDefLevel) {
-                        values[i] = encodedValues[encodedIndex++];
-                    }
-                    // else values[i] stays null
-                }
-            }
-            else {
-                System.arraycopy(encodedValues, 0, values, 0, numNonNullValues);
-            }
-        }
-        else if (header.encoding() == Encoding.RLE_DICTIONARY || header.encoding() == Encoding.PLAIN_DICTIONARY) {
-            // Decode dictionary indices
-            if (dictionary == null) {
-                throw new IOException("Dictionary page not found for RLE_DICTIONARY encoding");
-            }
-
-            int bitWidth = getBitWidth(dictionary.length - 1);
-
-            // In V2, dictionary indices don't have the 1-byte length prefix
-            // Read the RLE/Bit-Packing Hybrid encoded indices directly
-            byte[] indicesData = new byte[dataStream.available()];
-            dataStream.read(indicesData);
-
-            RleBitPackingHybridDecoder indexDecoder = new RleBitPackingHybridDecoder(
-                    new ByteArrayInputStream(indicesData), bitWidth);
-
-            int[] indices = new int[numNonNullValues];
-            indexDecoder.readInts(indices, 0, numNonNullValues);
-
-            // Map indices to dictionary values, applying definition levels
-            if (definitionLevels != null) {
-                int encodedIndex = 0;
-                int maxDefLevel = column.getMaxDefinitionLevel();
-                for (int i = 0; i < header.numValues(); i++) {
-                    if (definitionLevels[i] == maxDefLevel) {
-                        values[i] = dictionary[indices[encodedIndex++]];
-                    }
-                    // else values[i] stays null
-                }
-            }
-            else {
-                for (int i = 0; i < numNonNullValues; i++) {
-                    values[i] = dictionary[indices[i]];
-                }
-            }
-        }
-        else {
-            throw new UnsupportedOperationException(
-                    "Encoding not yet supported: " + header.encoding());
-        }
+        // Decode values and map to output array
+        Object[] values = decodeAndMapValues(
+                header.encoding(), dataStream, header.numValues(), numNonNullValues, definitionLevels, false);
 
         return new Page(header.numValues(), definitionLevels, repetitionLevels, values);
+    }
+
+    /**
+     * Decode levels using RLE/Bit-Packing Hybrid encoding.
+     */
+    private int[] decodeLevels(byte[] levelData, int numValues, int maxLevel) throws IOException {
+        int[] levels = new int[numValues];
+        RleBitPackingHybridDecoder decoder = new RleBitPackingHybridDecoder(
+                new ByteArrayInputStream(levelData), getBitWidth(maxLevel));
+        decoder.readInts(levels, 0, numValues);
+        return levels;
+    }
+
+    /**
+     * Count non-null values based on definition levels.
+     */
+    private int countNonNullValues(int numValues, int[] definitionLevels) {
+        if (definitionLevels == null) {
+            return numValues;
+        }
+        int maxDefLevel = column.getMaxDefinitionLevel();
+        int count = 0;
+        for (int i = 0; i < numValues; i++) {
+            if (definitionLevels[i] == maxDefLevel) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Decode values using the specified encoding and map them to the output array.
+     *
+     * @param encoding the encoding used for the values
+     * @param dataStream the input stream containing encoded data
+     * @param numValues total number of values (including nulls)
+     * @param numNonNullValues number of non-null values to decode
+     * @param definitionLevels definition levels for null handling (may be null)
+     * @param isV1 true for DATA_PAGE V1, false for DATA_PAGE_V2
+     * @return array of decoded values with nulls in correct positions
+     */
+    private Object[] decodeAndMapValues(Encoding encoding, InputStream dataStream,
+                                        int numValues, int numNonNullValues,
+                                        int[] definitionLevels, boolean isV1)
+            throws IOException {
+        Object[] values = new Object[numValues];
+        Object[] encodedValues;
+
+        switch (encoding) {
+            case PLAIN -> {
+                encodedValues = new Object[numNonNullValues];
+                PlainDecoder decoder = new PlainDecoder(dataStream, column.type(), column.typeLength());
+                decoder.readValues(encodedValues, 0, numNonNullValues);
+                mapEncodedValues(encodedValues, values, definitionLevels);
+            }
+            case RLE_DICTIONARY, PLAIN_DICTIONARY -> {
+                if (dictionary == null) {
+                    throw new IOException("Dictionary page not found for " + encoding + " encoding");
+                }
+
+                int bitWidth;
+                if (isV1) {
+                    // V1: dictionary indices start with 1-byte bit-width
+                    bitWidth = dataStream.read();
+                    if (bitWidth < 0) {
+                        throw new IOException("Failed to read bit width for dictionary indices");
+                    }
+                }
+                else {
+                    // V2: calculate bit width from dictionary size
+                    bitWidth = getBitWidth(dictionary.length - 1);
+                }
+
+                byte[] indicesData = dataStream.readAllBytes();
+                RleBitPackingHybridDecoder indexDecoder = new RleBitPackingHybridDecoder(
+                        new ByteArrayInputStream(indicesData), bitWidth);
+
+                int[] indices = new int[numNonNullValues];
+                indexDecoder.readInts(indices, 0, numNonNullValues);
+
+                // Convert indices to dictionary values
+                encodedValues = new Object[numNonNullValues];
+                for (int i = 0; i < numNonNullValues; i++) {
+                    encodedValues[i] = dictionary[indices[i]];
+                }
+                mapEncodedValues(encodedValues, values, definitionLevels);
+            }
+            case DELTA_BINARY_PACKED -> {
+                encodedValues = new Object[numNonNullValues];
+                DeltaBinaryPackedDecoder decoder = new DeltaBinaryPackedDecoder(dataStream, column.type());
+                decoder.readValues(encodedValues, 0, numNonNullValues);
+                mapEncodedValues(encodedValues, values, definitionLevels);
+            }
+            case DELTA_LENGTH_BYTE_ARRAY -> {
+                encodedValues = new Object[numNonNullValues];
+                DeltaLengthByteArrayDecoder decoder = new DeltaLengthByteArrayDecoder(dataStream);
+                decoder.readValues(encodedValues, 0, numNonNullValues);
+                mapEncodedValues(encodedValues, values, definitionLevels);
+            }
+            case DELTA_BYTE_ARRAY -> {
+                encodedValues = new Object[numNonNullValues];
+                DeltaByteArrayDecoder decoder = new DeltaByteArrayDecoder(dataStream);
+                decoder.readValues(encodedValues, 0, numNonNullValues);
+                mapEncodedValues(encodedValues, values, definitionLevels);
+            }
+            default -> throw new UnsupportedOperationException("Encoding not yet supported: " + encoding);
+        }
+
+        return values;
+    }
+
+    /**
+     * Map encoded values to output array, placing nulls where definition level indicates.
+     */
+    private void mapEncodedValues(Object[] encodedValues, Object[] output, int[] definitionLevels) {
+        if (definitionLevels == null) {
+            System.arraycopy(encodedValues, 0, output, 0, encodedValues.length);
+        }
+        else {
+            int encodedIndex = 0;
+            int maxDefLevel = column.getMaxDefinitionLevel();
+            for (int i = 0; i < output.length; i++) {
+                if (definitionLevels[i] == maxDefLevel) {
+                    output[i] = encodedValues[encodedIndex++];
+                }
+                // else output[i] stays null
+            }
+        }
+    }
+
+    /**
+     * Read a 4-byte little-endian integer from the stream.
+     */
+    private int readLittleEndianInt(InputStream stream) throws IOException {
+        byte[] bytes = new byte[4];
+        stream.read(bytes);
+        return java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt();
     }
 
     private void parseDictionaryPage(dev.morling.hardwood.metadata.DictionaryPageHeader header, byte[] data)

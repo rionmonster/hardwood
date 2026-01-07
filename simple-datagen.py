@@ -602,3 +602,140 @@ pq.write_table(
 print("\nGenerated triple_nested_list_test.parquet:")
 print("  - Schema: id, cube: list<list<list<int32>>>")
 print("  - Data: 5 rows with 3-level nested lists")
+
+# ============================================================================
+# Delta Encoding Test Files
+# ============================================================================
+
+# 9. DELTA_BINARY_PACKED encoding for INT32/INT64
+delta_int_schema = pa.schema([
+    ('id', pa.int64(), False),
+    ('value_i32', pa.int32(), False),
+    ('value_i64', pa.int64(), False),
+])
+
+# Use sequential and patterned values to test delta encoding well
+delta_int_data = {
+    'id': list(range(1, 201)),  # 1 to 200 (200 values - enough to span multiple miniblocks)
+    'value_i32': [i * 10 for i in range(1, 201)],  # 10, 20, 30, ... (constant delta = 10)
+    'value_i64': [i * i for i in range(1, 201)],  # 1, 4, 9, 16, ... (varying deltas)
+}
+
+delta_int_table = pa.table(delta_int_data, schema=delta_int_schema)
+
+# Force DELTA_BINARY_PACKED encoding for all integer columns
+pq.write_table(
+    delta_int_table,
+    'src/test/resources/delta_binary_packed_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0',
+    column_encoding={'id': 'DELTA_BINARY_PACKED', 'value_i32': 'DELTA_BINARY_PACKED', 'value_i64': 'DELTA_BINARY_PACKED'}
+)
+
+print("\nGenerated delta_binary_packed_test.parquet:")
+print("  - Encoding: DELTA_BINARY_PACKED")
+print("  - Data: 200 rows with id, value_i32, value_i64")
+
+# 10. DELTA_BINARY_PACKED with optional columns (nulls)
+delta_optional_schema = pa.schema([
+    ('id', pa.int32(), False),
+    ('optional_value', pa.int32(), True),  # nullable
+])
+
+delta_optional_data = {
+    'id': list(range(1, 101)),  # 1 to 100
+    'optional_value': [i * 5 if i % 3 != 0 else None for i in range(1, 101)],  # every 3rd value is null
+}
+
+delta_optional_table = pa.table(delta_optional_data, schema=delta_optional_schema)
+
+pq.write_table(
+    delta_optional_table,
+    'src/test/resources/delta_binary_packed_optional_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0',
+    column_encoding={'id': 'DELTA_BINARY_PACKED', 'optional_value': 'DELTA_BINARY_PACKED'}
+)
+
+print("\nGenerated delta_binary_packed_optional_test.parquet:")
+print("  - Encoding: DELTA_BINARY_PACKED with nullable column")
+print("  - Data: 100 rows, every 3rd optional_value is null")
+
+# 11. DELTA_LENGTH_BYTE_ARRAY encoding for strings
+delta_string_schema = pa.schema([
+    ('id', pa.int64(), False),
+    ('name', pa.string(), False),
+    ('description', pa.string(), False),
+])
+
+delta_string_data = {
+    'id': [1, 2, 3, 4, 5],
+    'name': ['Hello', 'World', 'Foobar', 'Test', 'Delta'],
+    'description': ['Short', 'A bit longer text', 'Medium length', 'Tiny', 'Another string value'],
+}
+
+delta_string_table = pa.table(delta_string_data, schema=delta_string_schema)
+
+pq.write_table(
+    delta_string_table,
+    'src/test/resources/delta_length_byte_array_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0',
+    column_encoding={'name': 'DELTA_LENGTH_BYTE_ARRAY', 'description': 'DELTA_LENGTH_BYTE_ARRAY'}
+)
+
+print("\nGenerated delta_length_byte_array_test.parquet:")
+print("  - Encoding: DELTA_LENGTH_BYTE_ARRAY for string columns")
+print("  - Data: 5 rows with id, name, description")
+
+# 12. DELTA_BYTE_ARRAY encoding for strings with common prefixes
+delta_byte_array_schema = pa.schema([
+    ('id', pa.int32(), False),
+    ('prefix_strings', pa.string(), False),
+    ('varying_strings', pa.string(), False),
+])
+
+# Strings with common prefixes - ideal for DELTA_BYTE_ARRAY encoding
+delta_byte_array_data = {
+    'id': [1, 2, 3, 4, 5, 6, 7, 8],
+    # Strings that share common prefixes with previous values
+    'prefix_strings': [
+        'apple',
+        'application',  # shares 'appl' with 'apple'
+        'apply',        # shares 'appl' with 'application'
+        'banana',       # no prefix shared with 'apply'
+        'bandana',      # shares 'ban' with 'banana'
+        'band',         # shares 'band' with 'bandana'
+        'bandwidth',    # shares 'band' with 'band'
+        'ban'           # shares 'ban' with 'bandwidth'
+    ],
+    # Strings with some common prefixes
+    'varying_strings': [
+        'hello',
+        'world',        # no common prefix
+        'wonderful',    # shares 'wo' with 'world'
+        'wonder',       # shares 'wonder' with 'wonderful'
+        'wander',       # shares 'w' with 'wonder'
+        'wandering',    # shares 'wander' with 'wander'
+        'test',         # no common prefix
+        'testing'       # shares 'test' with 'test'
+    ],
+}
+
+delta_byte_array_table = pa.table(delta_byte_array_data, schema=delta_byte_array_schema)
+
+pq.write_table(
+    delta_byte_array_table,
+    'src/test/resources/delta_byte_array_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0',
+    column_encoding={'prefix_strings': 'DELTA_BYTE_ARRAY', 'varying_strings': 'DELTA_BYTE_ARRAY'}
+)
+
+print("\nGenerated delta_byte_array_test.parquet:")
+print("  - Encoding: DELTA_BYTE_ARRAY for string columns")
+print("  - Data: 8 rows with id, prefix_strings, varying_strings")

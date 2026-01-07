@@ -270,22 +270,22 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
   - [x] Bit-packing decoding
 
 #### 2.4 Delta Encodings
-- [ ] DELTA_BINARY_PACKED
-  - [ ] Block/miniblock structure
-  - [ ] Min delta calculation per block
-  - [ ] Bit width calculation per miniblock
+- [x] DELTA_BINARY_PACKED
+  - [x] Block/miniblock structure
+  - [x] Min delta calculation per block
+  - [x] Bit width calculation per miniblock
   - [ ] Encoder implementation
-  - [ ] Decoder implementation
-- [ ] DELTA_LENGTH_BYTE_ARRAY
-  - [ ] Length encoding with DELTA_BINARY_PACKED
-  - [ ] Raw byte concatenation
+  - [x] Decoder implementation
+- [x] DELTA_LENGTH_BYTE_ARRAY
+  - [x] Length encoding with DELTA_BINARY_PACKED
+  - [x] Raw byte concatenation
   - [ ] Encoder implementation
-  - [ ] Decoder implementation
-- [ ] DELTA_BYTE_ARRAY
-  - [ ] Prefix length calculation
-  - [ ] Suffix extraction
+  - [x] Decoder implementation
+- [x] DELTA_BYTE_ARRAY
+  - [x] Prefix length calculation
+  - [x] Suffix extraction
   - [ ] Encoder implementation
-  - [ ] Decoder implementation
+  - [x] Decoder implementation
 
 #### 2.5 Byte Stream Split (BYTE_STREAM_SPLIT)
 - [ ] Float byte separation/interleaving
@@ -577,9 +577,9 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 - [x] **Validate**: Read files with various codecs from parquet-testing
 
 ### Milestone 5: Advanced Encodings
-- [ ] DELTA_BINARY_PACKED
-- [ ] DELTA_LENGTH_BYTE_ARRAY
-- [ ] DELTA_BYTE_ARRAY
+- [x] DELTA_BINARY_PACKED
+- [x] DELTA_LENGTH_BYTE_ARRAY
+- [x] DELTA_BYTE_ARRAY
 - [ ] BYTE_STREAM_SPLIT
 - [ ] **Validate**: Read files using these encodings
 
@@ -610,7 +610,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 
 ### Test Summary
 
-**Current Pass Rate: 190/215 (88.4%) parquet-testing, 25/25 unit tests**
+**Current Pass Rate: 193/215 (89.8%) parquet-testing, 29 unit tests**
 
 Progress:
 - Started (first column only): 163/215 (75.8%)
@@ -623,16 +623,18 @@ Progress:
 - After GZIP compression support: 189/215 (87.9%)
 - After ZSTD compression support: 190/215 (88.4%)
 - After nested types support: 25 unit tests (nested structs, lists, nested lists)
+- After DELTA_BINARY_PACKED/DELTA_LENGTH_BYTE_ARRAY: 189/215 (87.9%), 28 unit tests
+- After DELTA_BYTE_ARRAY: 193/215 (89.8%), 29 unit tests
 
-Remaining Failures by Category (25 total):
-- ZSTD compression: 3 files (edge cases with unusual frame descriptors)
-- LZ4 compression: 3 files
-- LZ4_RAW compression: 2 files
-- Special GZIP formats: 2 files (concatenated members, non-standard variant)
-- Delta encoding issues: 4 files (DELTA_BINARY_PACKED, DELTA_BYTE_ARRAY)
+Remaining Failures by Category (22 total):
+- Bad data files (intentionally malformed): 6 files
+- LZ4 compression: 5 files (hadoop_lz4, lz4_raw, non_hadoop_lz4)
+- Snappy decompression (DATA_PAGE_V2): 2 files
 - BYTE_STREAM_SPLIT encoding: 2 files
-- Snappy decompression failures: 2 files
-- Other edge cases: 7 files (EOF errors, malformed data, unknown types, etc.)
+- Brotli compression: 1 file
+- GZIP edge cases: 1 file (concatenated members)
+- RLE boolean encoding: 1 file
+- Other edge cases: 4 files (dict-page-offset-zero, fixed_length_byte_array, page_v2_empty_compressed, case-046)
 
 ### Test Categories
 - [ ] Round-trip tests (write → read → compare)
