@@ -739,3 +739,246 @@ pq.write_table(
 print("\nGenerated delta_byte_array_test.parquet:")
 print("  - Encoding: DELTA_BYTE_ARRAY for string columns")
 print("  - Data: 8 rows with id, prefix_strings, varying_strings")
+
+# ============================================================================
+# Map Test Files
+# ============================================================================
+
+# 13. Simple map test (map<string, int32>)
+simple_map_schema = pa.schema([
+    ('id', pa.int32(), False),
+    ('name', pa.string(), False),
+    ('attributes', pa.map_(pa.string(), pa.int32())),  # map<string, int32>
+])
+
+simple_map_data = [
+    {
+        'id': 1,
+        'name': 'Alice',
+        'attributes': [('age', 30), ('score', 95), ('level', 5)]
+    },
+    {
+        'id': 2,
+        'name': 'Bob',
+        'attributes': [('age', 25), ('score', 88)]  # different number of entries
+    },
+    {
+        'id': 3,
+        'name': 'Charlie',
+        'attributes': []  # empty map
+    },
+    {
+        'id': 4,
+        'name': 'Diana',
+        'attributes': None  # null map
+    },
+    {
+        'id': 5,
+        'name': 'Eve',
+        'attributes': [('single_key', 42)]  # single entry
+    }
+]
+
+simple_map_table = pa.Table.from_pylist(simple_map_data, schema=simple_map_schema)
+pq.write_table(
+    simple_map_table,
+    'src/test/resources/simple_map_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0'
+)
+
+print("\nGenerated simple_map_test.parquet:")
+print("  - Schema: id, name, attributes: map<string, int32>")
+print("  - Data: 5 rows with varying map sizes including empty and null")
+
+# 14. Map with different value types
+map_types_schema = pa.schema([
+    ('id', pa.int32(), False),
+    ('string_map', pa.map_(pa.string(), pa.string())),    # map<string, string>
+    ('int_map', pa.map_(pa.int32(), pa.int64())),         # map<int32, int64>
+    ('bool_map', pa.map_(pa.string(), pa.bool_())),       # map<string, bool>
+])
+
+map_types_data = [
+    {
+        'id': 1,
+        'string_map': [('greeting', 'hello'), ('farewell', 'goodbye')],
+        'int_map': [(1, 100), (2, 200), (3, 300)],
+        'bool_map': [('active', True), ('verified', False)]
+    },
+    {
+        'id': 2,
+        'string_map': [('color', 'blue')],
+        'int_map': [(10, 1000)],
+        'bool_map': [('enabled', True)]
+    },
+    {
+        'id': 3,
+        'string_map': [],
+        'int_map': [],
+        'bool_map': []
+    }
+]
+
+map_types_table = pa.Table.from_pylist(map_types_data, schema=map_types_schema)
+pq.write_table(
+    map_types_table,
+    'src/test/resources/map_types_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0'
+)
+
+print("\nGenerated map_types_test.parquet:")
+print("  - Schema: id, string_map: map<string,string>, int_map: map<int32,int64>, bool_map: map<string,bool>")
+print("  - Data: 3 rows with different map value types")
+
+# 15. Map of maps test (map<string, map<string, int32>>)
+map_of_maps_schema = pa.schema([
+    ('id', pa.int32(), False),
+    ('name', pa.string(), False),
+    ('nested_map', pa.map_(pa.string(), pa.map_(pa.string(), pa.int32()))),  # map<string, map<string, int32>>
+])
+
+map_of_maps_data = [
+    {
+        'id': 1,
+        'name': 'Department A',
+        'nested_map': [
+            ('team1', [('alice', 100), ('bob', 95)]),
+            ('team2', [('charlie', 88), ('diana', 92), ('eve', 90)])
+        ]
+    },
+    {
+        'id': 2,
+        'name': 'Department B',
+        'nested_map': [
+            ('solo_team', [('frank', 75)])
+        ]
+    },
+    {
+        'id': 3,
+        'name': 'Department C',
+        'nested_map': [
+            ('empty_team', [])  # inner map is empty
+        ]
+    },
+    {
+        'id': 4,
+        'name': 'Department D',
+        'nested_map': []  # outer map is empty
+    },
+    {
+        'id': 5,
+        'name': 'Department E',
+        'nested_map': None  # null map
+    }
+]
+
+map_of_maps_table = pa.Table.from_pylist(map_of_maps_data, schema=map_of_maps_schema)
+pq.write_table(
+    map_of_maps_table,
+    'src/test/resources/map_of_maps_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0'
+)
+
+print("\nGenerated map_of_maps_test.parquet:")
+print("  - Schema: id, name, nested_map: map<string, map<string, int32>>")
+print("  - Data: 5 rows with nested maps including empty and null cases")
+
+# 16. List of maps test (list<map<string, int32>>)
+list_of_maps_schema = pa.schema([
+    ('id', pa.int32(), False),
+    ('map_list', pa.list_(pa.map_(pa.string(), pa.int32()))),  # list<map<string, int32>>
+])
+
+list_of_maps_data = [
+    {
+        'id': 1,
+        'map_list': [
+            [('a', 1), ('b', 2)],
+            [('c', 3)],
+            [('d', 4), ('e', 5), ('f', 6)]
+        ]
+    },
+    {
+        'id': 2,
+        'map_list': [
+            [('single', 100)]
+        ]
+    },
+    {
+        'id': 3,
+        'map_list': [
+            []  # empty map in list
+        ]
+    },
+    {
+        'id': 4,
+        'map_list': []  # empty list
+    },
+    {
+        'id': 5,
+        'map_list': None  # null list
+    }
+]
+
+list_of_maps_table = pa.Table.from_pylist(list_of_maps_data, schema=list_of_maps_schema)
+pq.write_table(
+    list_of_maps_table,
+    'src/test/resources/list_of_maps_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0'
+)
+
+print("\nGenerated list_of_maps_test.parquet:")
+print("  - Schema: id, map_list: list<map<string, int32>>")
+print("  - Data: 5 rows with lists of maps")
+
+# 17. Map with struct values (map<string, struct>)
+person_type = pa.struct([
+    ('name', pa.string()),
+    ('age', pa.int32())
+])
+
+map_struct_value_schema = pa.schema([
+    ('id', pa.int32(), False),
+    ('people', pa.map_(pa.string(), person_type)),  # map<string, Person>
+])
+
+map_struct_value_data = [
+    {
+        'id': 1,
+        'people': [
+            ('employee1', {'name': 'Alice', 'age': 30}),
+            ('employee2', {'name': 'Bob', 'age': 25})
+        ]
+    },
+    {
+        'id': 2,
+        'people': [
+            ('manager', {'name': 'Charlie', 'age': 45})
+        ]
+    },
+    {
+        'id': 3,
+        'people': []
+    }
+]
+
+map_struct_value_table = pa.Table.from_pylist(map_struct_value_data, schema=map_struct_value_schema)
+pq.write_table(
+    map_struct_value_table,
+    'src/test/resources/map_struct_value_test.parquet',
+    use_dictionary=False,
+    compression=None,
+    data_page_version='1.0'
+)
+
+print("\nGenerated map_struct_value_test.parquet:")
+print("  - Schema: id, people: map<string, Person(name, age)>")
+print("  - Data: 3 rows with maps containing struct values")

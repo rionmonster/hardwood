@@ -53,7 +53,13 @@
       "Bash(timeout 120 ./mvnw test:*)",
       "Bash(timeout 180 ./mvnw test:*)",
       "WebFetch(domain:issues.apache.org)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(jar -tf:*)",
+      "Bash(unzip:*)",
+      "Bash(javap:*)",
+      "Bash(timeout 300 ./mvnw test:*)",
+      "Bash(../.docker-venv/bin/python:*)",
+      "Bash(timeout 60 ./mvnw test:*)"
     ]
   }
 }

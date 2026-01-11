@@ -74,8 +74,8 @@ public class FileSchema {
     }
 
     /**
-     * Check if a column (by index) is part of a list that contains struct elements.
-     * Such columns need raw mode reading for multi-column assembly.
+     * Check if a column (by index) is part of a list that contains struct elements,
+     * or is part of a MAP. Such columns need raw mode reading for multi-column assembly.
      */
     public boolean isColumnInListOfStruct(int columnIndex) {
         return isColumnInListOfStruct(rootNode, columnIndex, false);
@@ -88,18 +88,22 @@ public class FileSchema {
 
         SchemaNode.GroupNode group = (SchemaNode.GroupNode) node;
 
-        // Check if this is a list with struct elements
-        boolean isListOfStruct = false;
+        // Check if this is a list with struct elements or a MAP
+        boolean needsRawMode = false;
         if (group.isList()) {
             SchemaNode element = group.getListElement();
             if (element instanceof SchemaNode.GroupNode elementGroup && !elementGroup.isList()) {
                 // List element is a struct (group that's not a list)
-                isListOfStruct = true;
+                needsRawMode = true;
             }
+        }
+        else if (group.isMap()) {
+            // MAPs have repeated key-value pairs that need multi-column correlation
+            needsRawMode = true;
         }
 
         for (SchemaNode child : group.children()) {
-            if (isColumnInListOfStruct(child, columnIndex, inListWithStructElement || isListOfStruct)) {
+            if (isColumnInListOfStruct(child, columnIndex, inListWithStructElement || needsRawMode)) {
                 return true;
             }
         }

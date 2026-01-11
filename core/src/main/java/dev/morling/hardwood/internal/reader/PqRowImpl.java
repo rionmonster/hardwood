@@ -153,16 +153,22 @@ public class PqRowImpl implements PqRow {
             return convertLogicalType(rawValue, fieldSchema, UUID.class);
         }
         else if (type instanceof PqType.RowType) {
-            validateGroupNode(fieldSchema, false);
+            validateGroupNode(fieldSchema, false, false);
             Object[] arrayValue = (Object[]) rawValue;
             SchemaNode.GroupNode groupSchema = (SchemaNode.GroupNode) fieldSchema;
             return new PqRowImpl(arrayValue, groupSchema);
         }
         else if (type instanceof PqType.ListType) {
-            validateGroupNode(fieldSchema, true);
+            validateGroupNode(fieldSchema, true, false);
             List<?> listValue = (List<?>) rawValue;
             SchemaNode.GroupNode listSchema = (SchemaNode.GroupNode) fieldSchema;
             return new PqListImpl(listValue, listSchema);
+        }
+        else if (type instanceof PqType.MapType) {
+            validateGroupNode(fieldSchema, false, true);
+            List<?> mapValue = (List<?>) rawValue;
+            SchemaNode.GroupNode mapSchema = (SchemaNode.GroupNode) fieldSchema;
+            return new PqMapImpl(mapValue, mapSchema);
         }
         else {
             throw new IllegalArgumentException("Unknown PqType: " + type.getClass().getSimpleName());
@@ -205,7 +211,7 @@ public class PqRowImpl implements PqRow {
         }
     }
 
-    private void validateGroupNode(SchemaNode fieldSchema, boolean expectList) {
+    private void validateGroupNode(SchemaNode fieldSchema, boolean expectList, boolean expectMap) {
         if (!(fieldSchema instanceof SchemaNode.GroupNode group)) {
             throw new IllegalArgumentException(
                     "Field '" + fieldSchema.name() + "' is not a group type");
@@ -214,9 +220,13 @@ public class PqRowImpl implements PqRow {
             throw new IllegalArgumentException(
                     "Field '" + fieldSchema.name() + "' is not a list");
         }
-        if (!expectList && group.isList()) {
+        if (expectMap && !group.isMap()) {
             throw new IllegalArgumentException(
-                    "Field '" + fieldSchema.name() + "' is a list, not a struct");
+                    "Field '" + fieldSchema.name() + "' is not a map");
+        }
+        if (!expectList && !expectMap && (group.isList() || group.isMap())) {
+            throw new IllegalArgumentException(
+                    "Field '" + fieldSchema.name() + "' is a list or map, not a struct");
         }
     }
 

@@ -97,10 +97,13 @@ public class PqListImpl implements PqList {
             validateLogicalElement(LogicalType.UuidType.class);
         }
         else if (type instanceof PqType.RowType) {
-            validateGroupElement(false);
+            validateGroupElement(false, false);
         }
         else if (type instanceof PqType.ListType) {
-            validateGroupElement(true);
+            validateGroupElement(true, false);
+        }
+        else if (type instanceof PqType.MapType) {
+            validateGroupElement(false, true);
         }
     }
 
@@ -141,15 +144,18 @@ public class PqListImpl implements PqList {
         }
     }
 
-    private void validateGroupElement(boolean expectList) {
+    private void validateGroupElement(boolean expectList, boolean expectMap) {
         if (!(elementSchema instanceof SchemaNode.GroupNode group)) {
             throw new IllegalArgumentException("List elements are not group types");
         }
         if (expectList && !group.isList()) {
             throw new IllegalArgumentException("List elements are not lists");
         }
-        if (!expectList && group.isList()) {
-            throw new IllegalArgumentException("List elements are lists, not structs");
+        if (expectMap && !group.isMap()) {
+            throw new IllegalArgumentException("List elements are not maps");
+        }
+        if (!expectList && !expectMap && (group.isList() || group.isMap())) {
+            throw new IllegalArgumentException("List elements are lists or maps, not structs");
         }
     }
 
@@ -229,6 +235,11 @@ public class PqListImpl implements PqList {
             List<?> listValue = (List<?>) rawValue;
             SchemaNode.GroupNode nestedListSchema = (SchemaNode.GroupNode) elementSchema;
             return new PqListImpl(listValue, nestedListSchema);
+        }
+        else if (type instanceof PqType.MapType) {
+            List<?> mapValue = (List<?>) rawValue;
+            SchemaNode.GroupNode mapSchema = (SchemaNode.GroupNode) elementSchema;
+            return new PqMapImpl(mapValue, mapSchema);
         }
         else {
             throw new IllegalArgumentException("Unknown PqType: " + type.getClass().getSimpleName());

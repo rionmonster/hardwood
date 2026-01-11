@@ -25,6 +25,7 @@ import dev.morling.hardwood.reader.ParquetFileReader;
 import dev.morling.hardwood.reader.RowReader;
 import dev.morling.hardwood.api.PqRow;
 import dev.morling.hardwood.api.PqList;
+import dev.morling.hardwood.api.PqMap;
 import dev.morling.hardwood.api.PqType;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -88,6 +89,27 @@ try (ParquetFileReader fileReader = ParquetFileReader.open(path)) {
                     }
                 }
             }
+
+            // Access maps (map<string, int>)
+            PqMap attributes = row.getValue(PqType.MAP, "attributes");
+            if (attributes != null) {
+                for (PqMap.Entry entry : attributes.getEntries()) {
+                    String key = entry.getKey(PqType.STRING);
+                    Integer value = entry.getValue(PqType.INT32);
+                    System.out.println(key + " = " + value);
+                }
+            }
+
+            // Access maps with struct values (map<string, struct>)
+            PqMap people = row.getValue(PqType.MAP, "people");
+            if (people != null) {
+                for (PqMap.Entry entry : people.getEntries()) {
+                    String id = entry.getKey(PqType.STRING);
+                    PqRow person = entry.getValue(PqType.ROW);
+                    String personName = person.getValue(PqType.STRING, "name");
+                    int personAge = person.getValue(PqType.INT32, "age");
+                }
+            }
         }
     }
 }
@@ -111,6 +133,7 @@ try (ParquetFileReader fileReader = ParquetFileReader.open(path)) {
 | `PqType.UUID` | UUID logical type | `UUID` |
 | `PqType.ROW` | Nested struct | `PqRow` |
 | `PqType.LIST` | LIST logical type | `PqList` |
+| `PqType.MAP` | MAP logical type | `PqMap` |
 
 **Type validation:** The API validates at runtime that the requested `PqType` matches the schema. Mismatches throw `IllegalArgumentException` with a descriptive message.
 
@@ -203,7 +226,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
   - [x] INT_8, INT_16, INT_32, INT_64 (signed integers)
   - [x] UINT_8, UINT_16, UINT_32, UINT_64 (unsigned integers)
   - [x] LIST (nested list support with arbitrary depth)
-  - [ ] MAP (not implemented)
+  - [x] MAP (map<key, value> with nested maps and struct values)
   - [ ] INTERVAL (not implemented)
 - [x] Define repetition types: `REQUIRED`, `OPTIONAL`, `REPEATED`
 
@@ -449,9 +472,11 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
   - [x] Lists of structs (list<struct>)
   - [x] Nested lists (list<list<T>>, list<list<list<T>>>, arbitrary depth)
   - [x] Logical type conversion within nested lists (e.g., list<list<timestamp>>)
+  - [x] Maps (map<string, int>, map<string, struct>, etc.)
+  - [x] Nested maps (map<string, map<string, int>>)
+  - [x] List of maps (list<map<string, int>>)
 - [ ] Not implemented (future)
   - [ ] INTERVAL
-  - [ ] MAP
 
 ---
 
@@ -611,7 +636,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 
 ### Test Summary
 
-**Current Pass Rate: 207/215 (96.3%) parquet-testing, 29 unit tests**
+**Current Pass Rate: 207/215 (96.3%) parquet-testing, 39 unit tests**
 
 Progress:
 - Started (first column only): 163/215 (75.8%)
@@ -631,6 +656,7 @@ Progress:
 - After BYTE_STREAM_SPLIT encoding: 204/215 (94.9%), 29 unit tests
 - After Snappy DATA_PAGE_V2 fixes: 206/215 (95.8%), 29 unit tests
 - After dict-page-offset-zero fix: 207/215 (96.3%), 29 unit tests
+- After MAP support: 207/215 (96.3%), 39 unit tests
 
 Remaining Failures by Category (8 total):
 - Bad data files (intentionally malformed): 6 files (includes fixed_length_byte_array which has truncated page data - PyArrow also fails)
@@ -652,6 +678,10 @@ Remaining Failures by Category (8 total):
   - [x] Nested lists (list<list<int>>, list<list<list<int>>>)
   - [x] Logical types in nested lists (list<list<timestamp>>)
   - [x] AddressBook example from Dremel paper
+  - [x] Maps (map<string, int>)
+  - [x] Nested maps (map<string, map<string, int>>)
+  - [x] Map with struct values (map<string, struct>)
+  - [x] List of maps (list<map<string, int>>)
 - [ ] Cross-compatibility tests (write files, read with other implementations)
 - [ ] Fuzz testing (random schemas and data)
 - [ ] Edge cases (empty files, single values, max nesting)

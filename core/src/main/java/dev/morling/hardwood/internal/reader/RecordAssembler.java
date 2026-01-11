@@ -113,13 +113,31 @@ public class RecordAssembler {
 
     private Object assembleValue(SchemaNode node, List<ColumnBatch> batches, int batchPosition, int startColumn) {
         if (node instanceof SchemaNode.PrimitiveNode) {
-            return ((SimpleColumnBatch) batches.get(startColumn)).get(batchPosition);
+            ColumnBatch batch = batches.get(startColumn);
+            if (batch instanceof SimpleColumnBatch simple) {
+                return simple.get(batchPosition);
+            }
+            // RawColumnBatch - extract single value for this record
+            RawColumnBatch raw = (RawColumnBatch) batch;
+            List<ColumnBatch.ValueWithLevels> values = extractValuesFromBatch(raw, batchPosition);
+            if (values.isEmpty()) {
+                return null;
+            }
+            ColumnBatch.ValueWithLevels firstVal = values.get(0);
+            if (firstVal.defLevel() == raw.getColumn().getMaxDefinitionLevel()) {
+                return firstVal.value();
+            }
+            return null;
         }
 
         SchemaNode.GroupNode group = (SchemaNode.GroupNode) node;
-        return group.isList()
-                ? assembleList(group, batches, batchPosition, startColumn)
-                : assembleStruct(group, batches, batchPosition, startColumn);
+        if (group.isList()) {
+            return assembleList(group, batches, batchPosition, startColumn);
+        }
+        if (group.isMap()) {
+            return assembleMap(group, batches, batchPosition, startColumn);
+        }
+        return assembleStruct(group, batches, batchPosition, startColumn);
     }
 
     private Object[] assembleStruct(SchemaNode.GroupNode structNode, List<ColumnBatch> batches,
@@ -145,17 +163,73 @@ public class RecordAssembler {
         SchemaNode element = listNode.getListElement();
 
         // List of structs needs multi-column assembly
-        if (element instanceof SchemaNode.GroupNode elementGroup && !elementGroup.isList()) {
+        if (element instanceof SchemaNode.GroupNode elementGroup && !elementGroup.isList() && !elementGroup.isMap()) {
             return assembleListOfStruct(listNode, elementGroup, batches, batchPosition, startColumn);
         }
 
-        // List of primitives - use pre-assembled value
-        Object value = ((SimpleColumnBatch) batches.get(startColumn)).get(batchPosition);
-        if (value == null)
+        // List of maps needs special handling
+        if (element instanceof SchemaNode.GroupNode elementGroup && elementGroup.isMap()) {
+            return assembleListOfMaps(listNode, elementGroup, batches, batchPosition, startColumn);
+        }
+
+        // List of primitives - check batch type
+        ColumnBatch batch = batches.get(startColumn);
+        if (batch instanceof SimpleColumnBatch simple) {
+            Object value = simple.get(batchPosition);
+            if (value == null)
+                return null;
+            if (value instanceof List)
+                return (List<Object>) value;
+            return List.of(value);
+        }
+
+        // RawColumnBatch - assemble list from raw values
+        RawColumnBatch raw = (RawColumnBatch) batch;
+        List<ColumnBatch.ValueWithLevels> values = extractValuesFromBatch(raw, batchPosition);
+        if (values.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // Check null/empty
+        ColumnBatch.ValueWithLevels firstVal = values.get(0);
+        if (firstVal.defLevel() < listNode.maxDefinitionLevel()) {
+            return null; // list is null
+        }
+        int maxDefLevel = raw.getColumn().getMaxDefinitionLevel();
+        if (firstVal.defLevel() < maxDefLevel && values.size() == 1) {
+            return new ArrayList<>(); // empty list
+        }
+
+        // Build list of primitives
+        List<Object> result = new ArrayList<>();
+        for (ColumnBatch.ValueWithLevels val : values) {
+            if (val.defLevel() == maxDefLevel) {
+                result.add(val.value());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Assemble a MAP from column batches.
+     * MAPs are stored as repeated key_value groups with key and value children.
+     * Returns a list of key-value pairs represented as Object[] arrays.
+     */
+    private List<Object> assembleMap(SchemaNode.GroupNode mapNode, List<ColumnBatch> batches,
+                                     int batchPosition, int startColumn) {
+        // MAP structure: MAP -> repeated key_value -> (key, value)
+        // Get the key_value group
+        if (mapNode.children().isEmpty()) {
             return null;
-        if (value instanceof List)
-            return (List<Object>) value;
-        return List.of(value);
+        }
+
+        SchemaNode keyValueNode = mapNode.children().get(0);
+        if (!(keyValueNode instanceof SchemaNode.GroupNode keyValueGroup)) {
+            return null;
+        }
+
+        // Use assembleListOfStruct since MAP key_value is essentially a list of key-value structs
+        return assembleListOfStruct(mapNode, keyValueGroup, batches, batchPosition, startColumn);
     }
 
     private List<Object> assembleListOfStruct(SchemaNode.GroupNode listNode, SchemaNode.GroupNode elementSchema,
@@ -184,16 +258,23 @@ public class RecordAssembler {
 
         RawColumnBatch firstBatch = (RawColumnBatch) batches.get(startColumn);
         int elementMaxDefLevel = firstBatch.getColumn().getMaxDefinitionLevel();
-        if (firstValue.defLevel() < elementMaxDefLevel - 1 && firstColValues.size() == 1) {
+
+        // Empty container: def level equals container's def level (container exists but no elements)
+        if (firstValue.defLevel() == listNode.maxDefinitionLevel() && firstColValues.size() == 1) {
             return new ArrayList<>();
         }
 
         int listRepLevel = firstBatch.getColumn().getMaxRepetitionLevel();
 
+        // Determine the minimum def level needed for an element to be present
+        // For MAP key_value: elements exist when key is defined (def >= repeated group's level + 1)
+        // For LIST element: elements exist when element struct is defined
+        int repeatedGroupDefLevel = listNode.maxDefinitionLevel() + 1;
+
         // Build list of structs
         List<Object> result = new ArrayList<>();
         for (int elemIdx = 0; elemIdx < firstColValues.size(); elemIdx++) {
-            if (firstColValues.get(elemIdx).defLevel() < elementMaxDefLevel - 1)
+            if (firstColValues.get(elemIdx).defLevel() < repeatedGroupDefLevel)
                 continue;
 
             Object[] struct = buildStruct(elementSchema, columnRawValues, batches,
@@ -201,6 +282,108 @@ public class RecordAssembler {
             result.add(struct);
         }
         return result;
+    }
+
+    /**
+     * Assemble a LIST of MAPs from column batches.
+     * Groups map entries by list element using repetition levels.
+     */
+    private List<Object> assembleListOfMaps(SchemaNode.GroupNode listNode, SchemaNode.GroupNode mapSchema,
+                                            List<ColumnBatch> batches, int batchPosition, int startColumn) {
+        int numColumns = countPrimitiveColumns(mapSchema);
+        if (numColumns == 0)
+            return new ArrayList<>();
+
+        // Get raw values from all columns for this record
+        List<List<ColumnBatch.ValueWithLevels>> columnRawValues = new ArrayList<>();
+        for (int i = 0; i < numColumns; i++) {
+            ColumnBatch batch = batches.get(startColumn + i);
+            if (!(batch instanceof RawColumnBatch rawBatch))
+                return null;
+            columnRawValues.add(extractValuesFromBatch(rawBatch, batchPosition));
+        }
+
+        List<ColumnBatch.ValueWithLevels> firstColValues = columnRawValues.get(0);
+        if (firstColValues.isEmpty())
+            return new ArrayList<>();
+
+        // Check null/empty list
+        ColumnBatch.ValueWithLevels firstValue = firstColValues.get(0);
+        if (firstValue.defLevel() < listNode.maxDefinitionLevel())
+            return null;
+
+        // Empty list
+        if (firstValue.defLevel() == listNode.maxDefinitionLevel() && firstColValues.size() == 1) {
+            return new ArrayList<>();
+        }
+
+        RawColumnBatch firstBatch = (RawColumnBatch) batches.get(startColumn);
+        // List rep level is where list elements are separated
+        int listRepLevel = listNode.maxDefinitionLevel(); // rep level for list element boundary
+
+        // Get the key_value group from the MAP
+        SchemaNode.GroupNode keyValueGroup = (SchemaNode.GroupNode) mapSchema.children().get(0);
+
+        // Group values by list element (using list rep level boundary)
+        List<Object> result = new ArrayList<>();
+        int elemStart = 0;
+
+        for (int i = 0; i <= firstColValues.size(); i++) {
+            // Check if this is a new list element boundary or end of values
+            boolean isBoundary = (i == firstColValues.size()) ||
+                    (i > 0 && firstColValues.get(i).repLevel() <= listRepLevel);
+
+            if (isBoundary && i > elemStart) {
+                // Build map from entries [elemStart, i)
+                List<Object> mapEntries = buildMapEntries(keyValueGroup, columnRawValues, batches,
+                        startColumn, elemStart, i, mapSchema.maxDefinitionLevel());
+                result.add(mapEntries);
+                elemStart = i;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Build a single map's entries from a range of raw values.
+     */
+    private List<Object> buildMapEntries(SchemaNode.GroupNode keyValueGroup,
+                                         List<List<ColumnBatch.ValueWithLevels>> columnRawValues,
+                                         List<ColumnBatch> batches, int startColumn,
+                                         int rangeStart, int rangeEnd, int mapDefLevel) {
+        List<Object> entries = new ArrayList<>();
+        int repeatedGroupDefLevel = mapDefLevel + 1;
+
+        for (int entryIdx = rangeStart; entryIdx < rangeEnd; entryIdx++) {
+            if (columnRawValues.get(0).get(entryIdx).defLevel() < repeatedGroupDefLevel) {
+                continue;
+            }
+
+            // Build key-value struct for this entry
+            Object[] keyValue = new Object[keyValueGroup.children().size()];
+            int childColOffset = 0;
+
+            for (int i = 0; i < keyValue.length; i++) {
+                SchemaNode child = keyValueGroup.children().get(i);
+                int colCount = countPrimitiveColumns(child);
+
+                if (child instanceof SchemaNode.PrimitiveNode) {
+                    List<ColumnBatch.ValueWithLevels> colValues = columnRawValues.get(childColOffset);
+                    int maxDefLevel = batches.get(startColumn + childColOffset).getColumn().getMaxDefinitionLevel();
+                    if (entryIdx < colValues.size()) {
+                        ColumnBatch.ValueWithLevels val = colValues.get(entryIdx);
+                        if (val.defLevel() == maxDefLevel) {
+                            keyValue[i] = val.value();
+                        }
+                    }
+                }
+                childColOffset += colCount;
+            }
+            entries.add(keyValue);
+        }
+
+        return entries;
     }
 
     private Object[] buildStruct(SchemaNode.GroupNode elementSchema,
@@ -218,9 +401,20 @@ public class RecordAssembler {
                 structValues[i] = getPrimitiveValue(columnRawValues.get(childColOffset),
                         batches.get(startColumn + childColOffset).getColumn().getMaxDefinitionLevel(), elemIdx);
             }
-            else if (child instanceof SchemaNode.GroupNode groupChild && groupChild.isList()) {
-                structValues[i] = assembleNestedList(groupChild, batches, startColumn + childColOffset,
-                        columnRawValues, childColOffset, elemIdx, listRepLevel);
+            else if (child instanceof SchemaNode.GroupNode groupChild) {
+                if (groupChild.isList()) {
+                    structValues[i] = assembleNestedList(groupChild, batches, startColumn + childColOffset,
+                            columnRawValues, childColOffset, elemIdx, listRepLevel);
+                }
+                else if (groupChild.isMap()) {
+                    structValues[i] = assembleNestedMap(groupChild, batches, startColumn + childColOffset,
+                            columnRawValues, childColOffset, elemIdx, listRepLevel);
+                }
+                else {
+                    // Nested struct
+                    structValues[i] = assembleNestedStruct(groupChild, batches, startColumn + childColOffset,
+                            columnRawValues, childColOffset, elemIdx, listRepLevel);
+                }
             }
             childColOffset += colCount;
         }
@@ -258,12 +452,14 @@ public class RecordAssembler {
 
         if (firstValue.defLevel() < listNode.maxDefinitionLevel())
             return null;
-        if (firstValue.defLevel() < nestedMaxDefLevel - 1 && nestedColValues.get(0).size() == 1) {
+        // Empty list: def level equals container's def level
+        if (firstValue.defLevel() == listNode.maxDefinitionLevel() && nestedColValues.get(0).size() == 1) {
             return new ArrayList<>();
         }
 
         SchemaNode element = listNode.getListElement();
         List<Object> result = new ArrayList<>();
+        int repeatedGroupDefLevel = listNode.maxDefinitionLevel() + 1;
 
         // List of primitives
         if (!(element instanceof SchemaNode.GroupNode elementGroup) || elementGroup.isList()) {
@@ -276,7 +472,7 @@ public class RecordAssembler {
 
         // List of structs
         for (int elemIdx = 0; elemIdx < nestedColValues.get(0).size(); elemIdx++) {
-            if (nestedColValues.get(0).get(elemIdx).defLevel() < nestedMaxDefLevel - 1)
+            if (nestedColValues.get(0).get(elemIdx).defLevel() < repeatedGroupDefLevel)
                 continue;
 
             Object[] structValues = new Object[elementGroup.children().size()];
@@ -292,6 +488,122 @@ public class RecordAssembler {
             result.add(structValues);
         }
         return result;
+    }
+
+    /**
+     * Assemble a nested MAP within a struct element.
+     */
+    private List<Object> assembleNestedMap(SchemaNode.GroupNode mapNode, List<ColumnBatch> batches,
+                                           int startColumn, List<List<ColumnBatch.ValueWithLevels>> allRawValues,
+                                           int colOffset, int parentElemIdx, int parentRepLevel) {
+        // MAP structure: MAP -> key_value (REPEATED) -> (key, value)
+        if (mapNode.children().isEmpty()) {
+            return null;
+        }
+
+        SchemaNode keyValueNode = mapNode.children().get(0);
+        if (!(keyValueNode instanceof SchemaNode.GroupNode keyValueGroup)) {
+            return null;
+        }
+
+        int mapColCount = countPrimitiveColumns(mapNode);
+        if (mapColCount == 0 || colOffset >= allRawValues.size()) {
+            return new ArrayList<>();
+        }
+
+        // Extract values belonging to this parent element
+        List<List<ColumnBatch.ValueWithLevels>> mapColValues = new ArrayList<>();
+        for (int i = 0; i < mapColCount; i++) {
+            mapColValues.add(extractValues(allRawValues.get(colOffset + i), parentElemIdx, parentRepLevel));
+        }
+
+        if (mapColValues.get(0).isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        ColumnBatch.ValueWithLevels firstValue = mapColValues.get(0).get(0);
+        int mapMaxDefLevel = batches.get(startColumn).getColumn().getMaxDefinitionLevel();
+
+        // Check null map
+        if (firstValue.defLevel() < mapNode.maxDefinitionLevel()) {
+            return null;
+        }
+
+        // Check empty map: def level equals container's def level
+        if (firstValue.defLevel() == mapNode.maxDefinitionLevel() && mapColValues.get(0).size() == 1) {
+            return new ArrayList<>();
+        }
+
+        // Build list of key-value pairs
+        int mapRepLevel = batches.get(startColumn).getColumn().getMaxRepetitionLevel();
+        int repeatedGroupDefLevel = mapNode.maxDefinitionLevel() + 1;
+        List<Object> result = new ArrayList<>();
+
+        for (int entryIdx = 0; entryIdx < mapColValues.get(0).size(); entryIdx++) {
+            if (mapColValues.get(0).get(entryIdx).defLevel() < repeatedGroupDefLevel) {
+                continue;
+            }
+
+            Object[] keyValueStruct = buildStruct(keyValueGroup, mapColValues, batches,
+                    startColumn, entryIdx, mapRepLevel);
+            result.add(keyValueStruct);
+        }
+        return result;
+    }
+
+    /**
+     * Assemble a nested struct within a list/map element.
+     */
+    private Object[] assembleNestedStruct(SchemaNode.GroupNode structNode, List<ColumnBatch> batches,
+                                          int startColumn, List<List<ColumnBatch.ValueWithLevels>> allRawValues,
+                                          int colOffset, int parentElemIdx, int parentRepLevel) {
+        int structColCount = countPrimitiveColumns(structNode);
+        if (structColCount == 0 || colOffset >= allRawValues.size()) {
+            return null;
+        }
+
+        // Extract values belonging to this parent element
+        List<List<ColumnBatch.ValueWithLevels>> structColValues = new ArrayList<>();
+        for (int i = 0; i < structColCount; i++) {
+            structColValues.add(extractValues(allRawValues.get(colOffset + i), parentElemIdx, parentRepLevel));
+        }
+
+        if (structColValues.get(0).isEmpty()) {
+            return null;
+        }
+
+        ColumnBatch.ValueWithLevels firstValue = structColValues.get(0).get(0);
+        int structMaxDefLevel = batches.get(startColumn).getColumn().getMaxDefinitionLevel();
+
+        // Check null struct
+        if (firstValue.defLevel() < structNode.maxDefinitionLevel()) {
+            return null;
+        }
+
+        // Build struct values
+        Object[] structValues = new Object[structNode.children().size()];
+        int childColOffset = 0;
+
+        for (int i = 0; i < structValues.length; i++) {
+            SchemaNode child = structNode.children().get(i);
+            int colCount = countPrimitiveColumns(child);
+
+            if (child instanceof SchemaNode.PrimitiveNode) {
+                structValues[i] = getPrimitiveValue(structColValues.get(childColOffset),
+                        batches.get(startColumn + childColOffset).getColumn().getMaxDefinitionLevel(), 0);
+            }
+            childColOffset += colCount;
+        }
+
+        // Check if all values are null
+        boolean allNull = true;
+        for (Object val : structValues) {
+            if (val != null) {
+                allNull = false;
+                break;
+            }
+        }
+        return allNull ? null : structValues;
     }
 
     /**

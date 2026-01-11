@@ -39,6 +39,7 @@ interface PqType<T> {
     PqType<UUID> UUID = new UuidType();
     PqType<PqRow> ROW = new RowType();
     PqType<PqList> LIST = new ListType();
+    PqType<PqMap> MAP = new MapType();
 
     // Physical types
     record BooleanType() implements PqType<Boolean> {}
@@ -70,4 +71,6 @@ interface PqType<T> {
     record RowType() implements PqType<PqRow> {}
 
     record ListType() implements PqType<PqList> {}
+
+    record MapType() implements PqType<PqMap> {}
 }

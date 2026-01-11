@@ -7,10 +7,6 @@
  */
 package dev.morling.hardwood.testing;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.within;
-import static org.junit.jupiter.api.Assumptions.assumeFalse;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -36,6 +32,10 @@ import dev.morling.hardwood.reader.ParquetFileReader;
 import dev.morling.hardwood.reader.RowReader;
 import dev.morling.hardwood.row.PqRow;
 import dev.morling.hardwood.row.PqType;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
  * Comparison tests that validate Hardwood's output against the reference
@@ -67,8 +67,6 @@ class ParquetComparisonTest {
             "unknown-logical-type.parquet", // Unknown logical type
 
             // Hardwood reader issues
-            "nonnullable.impala.parquet", // RawColumnBatch cast issue
-            "nullable.impala.parquet", // RawColumnBatch cast issue
             "nulls.snappy.parquet", // Nested struct comparison not yet implemented
 
             // shredded_variant files with parquet-java issues
