@@ -611,7 +611,7 @@ A from-scratch implementation of Apache Parquet reader/writer in Java with no de
 
 ### Test Summary
 
-**Current Pass Rate: 206/215 (95.8%) parquet-testing, 29 unit tests**
+**Current Pass Rate: 207/215 (96.3%) parquet-testing, 29 unit tests**
 
 Progress:
 - Started (first column only): 163/215 (75.8%)
@@ -630,11 +630,12 @@ Progress:
 - After DATA_PAGE_V2 decompression fix + RLE boolean: 202/215 (94.0%), 29 unit tests
 - After BYTE_STREAM_SPLIT encoding: 204/215 (94.9%), 29 unit tests
 - After Snappy DATA_PAGE_V2 fixes: 206/215 (95.8%), 29 unit tests
+- After dict-page-offset-zero fix: 207/215 (96.3%), 29 unit tests
 
-Remaining Failures by Category (9 total):
-- Bad data files (intentionally malformed): 5 files
+Remaining Failures by Category (8 total):
+- Bad data files (intentionally malformed): 6 files (includes fixed_length_byte_array which has truncated page data - PyArrow also fails)
 - Brotli compression: 1 file
-- Other edge cases: 3 files (dict-page-offset-zero, fixed_length_byte_array, case-046)
+- Other edge cases: 1 file (case-046)
 
 ### Test Categories
 - [ ] Round-trip tests (write → read → compare)

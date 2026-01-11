@@ -46,8 +46,12 @@ public class PageReader {
         this.columnMetaData = columnMetaData;
         this.column = column;
 
-        if (columnMetaData.dictionaryPageOffset() != null) {
-            this.currentOffset = columnMetaData.dictionaryPageOffset();
+        // Use dictionary page offset if present and > 0.
+        // Offset 0 is invalid (PAR1 magic) and should be treated as "no dictionary page".
+        // See ARROW-5322: Some writers incorrectly set dictionary_page_offset to 0.
+        Long dictOffset = columnMetaData.dictionaryPageOffset();
+        if (dictOffset != null && dictOffset > 0) {
+            this.currentOffset = dictOffset;
         }
         else {
             this.currentOffset = columnMetaData.dataPageOffset();

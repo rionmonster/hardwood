@@ -19,7 +19,13 @@ public enum Encoding {
     DELTA_LENGTH_BYTE_ARRAY(6),
     DELTA_BYTE_ARRAY(7),
     RLE_DICTIONARY(8),
-    BYTE_STREAM_SPLIT(9);
+    BYTE_STREAM_SPLIT(9),
+    /**
+     * Placeholder for unknown/unsupported encodings found in metadata.
+     * This allows reading files that list encodings we don't recognize
+     * in the column metadata, as long as the actual pages use supported encodings.
+     */
+    UNKNOWN(-1);
 
     private final int thriftValue;
 
@@ -37,6 +43,9 @@ public enum Encoding {
                 return encoding;
             }
         }
-        throw new IllegalArgumentException("Unknown encoding: " + value);
+        // Return UNKNOWN for unrecognized encodings rather than throwing.
+        // The encodings list in metadata is informational; actual page
+        // headers specify which encoding is used for decoding.
+        return UNKNOWN;
     }
 }

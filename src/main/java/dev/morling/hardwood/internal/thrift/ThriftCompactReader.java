@@ -252,12 +252,19 @@ public class ThriftCompactReader {
      * Skip an entire struct (read until STOP field).
      */
     public void skipStruct() throws IOException {
-        while (true) {
-            FieldHeader header = readFieldHeader();
-            if (header == null) {
-                break;
+        // Save and reset field ID context for nested struct
+        short saved = pushFieldIdContext();
+        try {
+            while (true) {
+                FieldHeader header = readFieldHeader();
+                if (header == null) {
+                    break;
+                }
+                skipField(header.type());
             }
-            skipField(header.type());
+        }
+        finally {
+            popFieldIdContext(saved);
         }
     }
 
