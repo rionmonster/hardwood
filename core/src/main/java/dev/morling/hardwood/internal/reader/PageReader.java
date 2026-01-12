@@ -135,22 +135,22 @@ public class PageReader {
 
         // Read repetition levels
         int[] repetitionLevels = null;
-        if (column.getMaxRepetitionLevel() > 0) {
+        if (column.maxRepetitionLevel() > 0) {
             int repLevelLength = readLittleEndianInt(dataStream);
             byte[] repLevelData = new byte[repLevelLength];
             dataStream.read(repLevelData);
 
-            repetitionLevels = decodeLevels(repLevelData, header.numValues(), column.getMaxRepetitionLevel());
+            repetitionLevels = decodeLevels(repLevelData, header.numValues(), column.maxRepetitionLevel());
         }
 
         // Read definition levels
         int[] definitionLevels = null;
-        if (column.getMaxDefinitionLevel() > 0) {
+        if (column.maxDefinitionLevel() > 0) {
             int defLevelLength = readLittleEndianInt(dataStream);
             byte[] defLevelData = new byte[defLevelLength];
             dataStream.read(defLevelData);
 
-            definitionLevels = decodeLevels(defLevelData, header.numValues(), column.getMaxDefinitionLevel());
+            definitionLevels = decodeLevels(defLevelData, header.numValues(), column.maxDefinitionLevel());
         }
 
         // Count non-null values
@@ -177,18 +177,18 @@ public class PageReader {
 
         // Read repetition levels (uncompressed)
         int[] repetitionLevels = null;
-        if (column.getMaxRepetitionLevel() > 0 && repLevelLen > 0) {
+        if (column.maxRepetitionLevel() > 0 && repLevelLen > 0) {
             byte[] repLevelData = new byte[repLevelLen];
             System.arraycopy(pageData, 0, repLevelData, 0, repLevelLen);
-            repetitionLevels = decodeLevels(repLevelData, header.numValues(), column.getMaxRepetitionLevel());
+            repetitionLevels = decodeLevels(repLevelData, header.numValues(), column.maxRepetitionLevel());
         }
 
         // Read definition levels (uncompressed)
         int[] definitionLevels = null;
-        if (column.getMaxDefinitionLevel() > 0 && defLevelLen > 0) {
+        if (column.maxDefinitionLevel() > 0 && defLevelLen > 0) {
             byte[] defLevelData = new byte[defLevelLen];
             System.arraycopy(pageData, repLevelLen, defLevelData, 0, defLevelLen);
-            definitionLevels = decodeLevels(defLevelData, header.numValues(), column.getMaxDefinitionLevel());
+            definitionLevels = decodeLevels(defLevelData, header.numValues(), column.maxDefinitionLevel());
         }
 
         // Decompress values section if needed
@@ -242,7 +242,7 @@ public class PageReader {
         if (definitionLevels == null) {
             return numValues;
         }
-        int maxDefLevel = column.getMaxDefinitionLevel();
+        int maxDefLevel = column.maxDefinitionLevel();
         int count = 0;
         for (int i = 0; i < numValues; i++) {
             if (definitionLevels[i] == maxDefLevel) {
@@ -377,7 +377,7 @@ public class PageReader {
         }
         else {
             int encodedIndex = 0;
-            int maxDefLevel = column.getMaxDefinitionLevel();
+            int maxDefLevel = column.maxDefinitionLevel();
             for (int i = 0; i < output.length; i++) {
                 if (definitionLevels[i] == maxDefLevel) {
                     output[i] = encodedValues[encodedIndex++];

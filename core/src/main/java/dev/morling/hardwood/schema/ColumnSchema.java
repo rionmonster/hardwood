@@ -27,38 +27,6 @@ public record ColumnSchema(
         LogicalType logicalType) {
 
     /**
-     * Constructor for flat schemas (backward compatibility).
-     */
-    public ColumnSchema(
-            String name,
-            PhysicalType type,
-            RepetitionType repetitionType,
-            Integer typeLength,
-            int columnIndex,
-            LogicalType logicalType) {
-        this(name, type, repetitionType, typeLength, columnIndex,
-                repetitionType == RepetitionType.REQUIRED ? 0 : 1,
-                0,
-                logicalType);
-    }
-
-    public int getMaxDefinitionLevel() {
-        return maxDefinitionLevel;
-    }
-
-    public int getMaxRepetitionLevel() {
-        return maxRepetitionLevel;
-    }
-
-    public boolean isRequired() {
-        return repetitionType == RepetitionType.REQUIRED;
-    }
-
-    public boolean isOptional() {
-        return repetitionType == RepetitionType.OPTIONAL;
-    }
-
-    /**
      * Returns the corresponding PqType for this column based on its logical and physical types.
      */
     public PqType<?> toPqType() {

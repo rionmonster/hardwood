@@ -45,8 +45,8 @@ public class ColumnReader {
         this.column = column;
         this.columnMetaData = columnChunk.metaData();
         this.pageReader = new PageReader(file, columnMetaData, column);
-        this.maxDefinitionLevel = column.getMaxDefinitionLevel();
-        this.maxRepetitionLevel = column.getMaxRepetitionLevel();
+        this.maxDefinitionLevel = column.maxDefinitionLevel();
+        this.maxRepetitionLevel = column.maxRepetitionLevel();
         this.totalValues = columnMetaData.numValues();
     }
 

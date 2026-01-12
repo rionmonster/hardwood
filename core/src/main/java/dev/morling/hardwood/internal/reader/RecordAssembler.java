@@ -124,7 +124,7 @@ public class RecordAssembler {
                 return null;
             }
             ColumnBatch.ValueWithLevels firstVal = values.get(0);
-            if (firstVal.defLevel() == raw.getColumn().getMaxDefinitionLevel()) {
+            if (firstVal.defLevel() == raw.getColumn().maxDefinitionLevel()) {
                 return firstVal.value();
             }
             return null;
@@ -212,7 +212,7 @@ public class RecordAssembler {
         if (firstVal.defLevel() < listNode.maxDefinitionLevel()) {
             return null; // list is null
         }
-        int maxDefLevel = raw.getColumn().getMaxDefinitionLevel();
+        int maxDefLevel = raw.getColumn().maxDefinitionLevel();
         if (firstVal.defLevel() < maxDefLevel && values.size() == 1) {
             return new ArrayList<>(); // empty list
         }
@@ -274,14 +274,14 @@ public class RecordAssembler {
             return null;
 
         RawColumnBatch firstBatch = (RawColumnBatch) batches.get(startColumn);
-        int elementMaxDefLevel = firstBatch.getColumn().getMaxDefinitionLevel();
+        int elementMaxDefLevel = firstBatch.getColumn().maxDefinitionLevel();
 
         // Empty container: def level equals container's def level (container exists but no elements)
         if (firstValue.defLevel() == listNode.maxDefinitionLevel() && firstColValues.size() == 1) {
             return new ArrayList<>();
         }
 
-        int listRepLevel = firstBatch.getColumn().getMaxRepetitionLevel();
+        int listRepLevel = firstBatch.getColumn().maxRepetitionLevel();
 
         // Determine the minimum def level needed for an element to be present
         // For MAP key_value: elements exist when key is defined (def >= repeated group's level + 1)
@@ -387,7 +387,7 @@ public class RecordAssembler {
 
                 if (child instanceof SchemaNode.PrimitiveNode) {
                     List<ColumnBatch.ValueWithLevels> colValues = columnRawValues.get(childColOffset);
-                    int maxDefLevel = batches.get(startColumn + childColOffset).getColumn().getMaxDefinitionLevel();
+                    int maxDefLevel = batches.get(startColumn + childColOffset).getColumn().maxDefinitionLevel();
                     if (entryIdx < colValues.size()) {
                         ColumnBatch.ValueWithLevels val = colValues.get(entryIdx);
                         if (val.defLevel() == maxDefLevel) {
@@ -416,7 +416,7 @@ public class RecordAssembler {
 
             if (child instanceof SchemaNode.PrimitiveNode) {
                 structValues[i] = getPrimitiveValue(columnRawValues.get(childColOffset),
-                        batches.get(startColumn + childColOffset).getColumn().getMaxDefinitionLevel(), elemIdx);
+                        batches.get(startColumn + childColOffset).getColumn().maxDefinitionLevel(), elemIdx);
             }
             else if (child instanceof SchemaNode.GroupNode groupChild) {
                 if (groupChild.isList()) {
@@ -465,7 +465,7 @@ public class RecordAssembler {
             return new ArrayList<>();
 
         ColumnBatch.ValueWithLevels firstValue = nestedColValues.get(0).get(0);
-        int nestedMaxDefLevel = batches.get(startColumn).getColumn().getMaxDefinitionLevel();
+        int nestedMaxDefLevel = batches.get(startColumn).getColumn().maxDefinitionLevel();
 
         if (firstValue.defLevel() < listNode.maxDefinitionLevel())
             return null;
@@ -498,7 +498,7 @@ public class RecordAssembler {
                 SchemaNode child = elementGroup.children().get(i);
                 if (child instanceof SchemaNode.PrimitiveNode) {
                     structValues[i] = getPrimitiveValue(nestedColValues.get(childIdx),
-                            batches.get(startColumn + childIdx).getColumn().getMaxDefinitionLevel(), elemIdx);
+                            batches.get(startColumn + childIdx).getColumn().maxDefinitionLevel(), elemIdx);
                     childIdx++;
                 }
             }
@@ -539,7 +539,7 @@ public class RecordAssembler {
         }
 
         ColumnBatch.ValueWithLevels firstValue = mapColValues.get(0).get(0);
-        int mapMaxDefLevel = batches.get(startColumn).getColumn().getMaxDefinitionLevel();
+        int mapMaxDefLevel = batches.get(startColumn).getColumn().maxDefinitionLevel();
 
         // Check null map
         if (firstValue.defLevel() < mapNode.maxDefinitionLevel()) {
@@ -552,7 +552,7 @@ public class RecordAssembler {
         }
 
         // Build list of key-value pairs
-        int mapRepLevel = batches.get(startColumn).getColumn().getMaxRepetitionLevel();
+        int mapRepLevel = batches.get(startColumn).getColumn().maxRepetitionLevel();
         int repeatedGroupDefLevel = mapNode.maxDefinitionLevel() + 1;
         List<Object> result = new ArrayList<>();
 
@@ -590,7 +590,7 @@ public class RecordAssembler {
         }
 
         ColumnBatch.ValueWithLevels firstValue = structColValues.get(0).get(0);
-        int structMaxDefLevel = batches.get(startColumn).getColumn().getMaxDefinitionLevel();
+        int structMaxDefLevel = batches.get(startColumn).getColumn().maxDefinitionLevel();
 
         // Check null struct
         if (firstValue.defLevel() < structNode.maxDefinitionLevel()) {
@@ -607,7 +607,7 @@ public class RecordAssembler {
 
             if (child instanceof SchemaNode.PrimitiveNode) {
                 structValues[i] = getPrimitiveValue(structColValues.get(childColOffset),
-                        batches.get(startColumn + childColOffset).getColumn().getMaxDefinitionLevel(), 0);
+                        batches.get(startColumn + childColOffset).getColumn().maxDefinitionLevel(), 0);
             }
             childColOffset += colCount;
         }
