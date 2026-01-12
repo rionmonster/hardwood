@@ -94,85 +94,73 @@ public class PqRowImpl implements PqRow {
         throw new IllegalArgumentException("Field not found: " + name);
     }
 
-    @SuppressWarnings("unchecked")
     private Object convertValue(Object rawValue, PqType<?> type, SchemaNode fieldSchema) {
         if (rawValue == null) {
             return null;
         }
 
-        // Validate and convert based on PqType using instanceof checks (Java 17 compatible)
-        if (type instanceof PqType.BooleanType) {
-            validatePhysicalType(fieldSchema, PhysicalType.BOOLEAN);
-            return (Boolean) rawValue;
-        }
-        else if (type instanceof PqType.Int32Type) {
-            validatePhysicalType(fieldSchema, PhysicalType.INT32);
-            return (Integer) rawValue;
-        }
-        else if (type instanceof PqType.Int64Type) {
-            validatePhysicalType(fieldSchema, PhysicalType.INT64);
-            return (Long) rawValue;
-        }
-        else if (type instanceof PqType.FloatType) {
-            validatePhysicalType(fieldSchema, PhysicalType.FLOAT);
-            return (Float) rawValue;
-        }
-        else if (type instanceof PqType.DoubleType) {
-            validatePhysicalType(fieldSchema, PhysicalType.DOUBLE);
-            return (Double) rawValue;
-        }
-        else if (type instanceof PqType.BinaryType) {
-            validatePhysicalType(fieldSchema, PhysicalType.BYTE_ARRAY, PhysicalType.FIXED_LEN_BYTE_ARRAY);
-            return (byte[]) rawValue;
-        }
-        else if (type instanceof PqType.StringType) {
-            validateLogicalType(fieldSchema, LogicalType.StringType.class, true);
-            if (rawValue instanceof String) {
-                return rawValue;
+        return switch (type) {
+            case PqType.BooleanType t -> {
+                validatePhysicalType(fieldSchema, PhysicalType.BOOLEAN);
+                yield rawValue;
             }
-            return new String((byte[]) rawValue, StandardCharsets.UTF_8);
-        }
-        else if (type instanceof PqType.DateType) {
-            validateLogicalType(fieldSchema, LogicalType.DateType.class, false);
-            return convertLogicalType(rawValue, fieldSchema, LocalDate.class);
-        }
-        else if (type instanceof PqType.TimeType) {
-            validateLogicalType(fieldSchema, LogicalType.TimeType.class, false);
-            return convertLogicalType(rawValue, fieldSchema, LocalTime.class);
-        }
-        else if (type instanceof PqType.TimestampType) {
-            validateLogicalType(fieldSchema, LogicalType.TimestampType.class, false);
-            return convertLogicalType(rawValue, fieldSchema, Instant.class);
-        }
-        else if (type instanceof PqType.DecimalType) {
-            validateLogicalType(fieldSchema, LogicalType.DecimalType.class, false);
-            return convertLogicalType(rawValue, fieldSchema, BigDecimal.class);
-        }
-        else if (type instanceof PqType.UuidType) {
-            validateLogicalType(fieldSchema, LogicalType.UuidType.class, false);
-            return convertLogicalType(rawValue, fieldSchema, UUID.class);
-        }
-        else if (type instanceof PqType.RowType) {
-            validateGroupNode(fieldSchema, false, false);
-            Object[] arrayValue = (Object[]) rawValue;
-            SchemaNode.GroupNode groupSchema = (SchemaNode.GroupNode) fieldSchema;
-            return new PqRowImpl(arrayValue, groupSchema);
-        }
-        else if (type instanceof PqType.ListType) {
-            validateGroupNode(fieldSchema, true, false);
-            List<?> listValue = (List<?>) rawValue;
-            SchemaNode.GroupNode listSchema = (SchemaNode.GroupNode) fieldSchema;
-            return new PqListImpl(listValue, listSchema);
-        }
-        else if (type instanceof PqType.MapType) {
-            validateGroupNode(fieldSchema, false, true);
-            List<?> mapValue = (List<?>) rawValue;
-            SchemaNode.GroupNode mapSchema = (SchemaNode.GroupNode) fieldSchema;
-            return new PqMapImpl(mapValue, mapSchema);
-        }
-        else {
-            throw new IllegalArgumentException("Unknown PqType: " + type.getClass().getSimpleName());
-        }
+            case PqType.Int32Type t -> {
+                validatePhysicalType(fieldSchema, PhysicalType.INT32);
+                yield rawValue;
+            }
+            case PqType.Int64Type t -> {
+                validatePhysicalType(fieldSchema, PhysicalType.INT64);
+                yield rawValue;
+            }
+            case PqType.FloatType t -> {
+                validatePhysicalType(fieldSchema, PhysicalType.FLOAT);
+                yield rawValue;
+            }
+            case PqType.DoubleType t -> {
+                validatePhysicalType(fieldSchema, PhysicalType.DOUBLE);
+                yield rawValue;
+            }
+            case PqType.BinaryType t -> {
+                validatePhysicalType(fieldSchema, PhysicalType.BYTE_ARRAY, PhysicalType.FIXED_LEN_BYTE_ARRAY);
+                yield rawValue;
+            }
+            case PqType.StringType t -> {
+                validateLogicalType(fieldSchema, LogicalType.StringType.class, true);
+                yield rawValue instanceof String ? rawValue : new String((byte[]) rawValue, StandardCharsets.UTF_8);
+            }
+            case PqType.DateType t -> {
+                validateLogicalType(fieldSchema, LogicalType.DateType.class, false);
+                yield convertLogicalType(rawValue, fieldSchema, LocalDate.class);
+            }
+            case PqType.TimeType t -> {
+                validateLogicalType(fieldSchema, LogicalType.TimeType.class, false);
+                yield convertLogicalType(rawValue, fieldSchema, LocalTime.class);
+            }
+            case PqType.TimestampType t -> {
+                validateLogicalType(fieldSchema, LogicalType.TimestampType.class, false);
+                yield convertLogicalType(rawValue, fieldSchema, Instant.class);
+            }
+            case PqType.DecimalType t -> {
+                validateLogicalType(fieldSchema, LogicalType.DecimalType.class, false);
+                yield convertLogicalType(rawValue, fieldSchema, BigDecimal.class);
+            }
+            case PqType.UuidType t -> {
+                validateLogicalType(fieldSchema, LogicalType.UuidType.class, false);
+                yield convertLogicalType(rawValue, fieldSchema, UUID.class);
+            }
+            case PqType.RowType t -> {
+                validateGroupNode(fieldSchema, false, false);
+                yield new PqRowImpl((Object[]) rawValue, (SchemaNode.GroupNode) fieldSchema);
+            }
+            case PqType.ListType t -> {
+                validateGroupNode(fieldSchema, true, false);
+                yield new PqListImpl((List<?>) rawValue, (SchemaNode.GroupNode) fieldSchema);
+            }
+            case PqType.MapType t -> {
+                validateGroupNode(fieldSchema, false, true);
+                yield new PqMapImpl((List<?>) rawValue, (SchemaNode.GroupNode) fieldSchema);
+            }
+        };
     }
 
     private void validatePhysicalType(SchemaNode fieldSchema, PhysicalType... expectedTypes) {

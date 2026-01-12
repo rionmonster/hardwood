@@ -59,7 +59,9 @@
       "Bash(javap:*)",
       "Bash(timeout 300 ./mvnw test:*)",
       "Bash(../.docker-venv/bin/python:*)",
-      "Bash(timeout 60 ./mvnw test:*)"
+      "Bash(timeout 60 ./mvnw test:*)",
+      "Bash(mvn compile:*)",
+      "WebFetch(domain:mvnrepository.com)"
     ]
   }
 }

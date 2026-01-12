@@ -59,51 +59,22 @@ public class PqListImpl implements PqList {
             throw new IllegalStateException("List has no element schema");
         }
 
-        // Validate using instanceof checks (Java 17 compatible)
-        if (type instanceof PqType.BooleanType) {
-            validatePrimitiveElement(PhysicalType.BOOLEAN);
-        }
-        else if (type instanceof PqType.Int32Type) {
-            validatePrimitiveElement(PhysicalType.INT32);
-        }
-        else if (type instanceof PqType.Int64Type) {
-            validatePrimitiveElement(PhysicalType.INT64);
-        }
-        else if (type instanceof PqType.FloatType) {
-            validatePrimitiveElement(PhysicalType.FLOAT);
-        }
-        else if (type instanceof PqType.DoubleType) {
-            validatePrimitiveElement(PhysicalType.DOUBLE);
-        }
-        else if (type instanceof PqType.BinaryType) {
-            validatePrimitiveElement(PhysicalType.BYTE_ARRAY, PhysicalType.FIXED_LEN_BYTE_ARRAY);
-        }
-        else if (type instanceof PqType.StringType) {
-            validateStringElement();
-        }
-        else if (type instanceof PqType.DateType) {
-            validateLogicalElement(LogicalType.DateType.class);
-        }
-        else if (type instanceof PqType.TimeType) {
-            validateLogicalElement(LogicalType.TimeType.class);
-        }
-        else if (type instanceof PqType.TimestampType) {
-            validateLogicalElement(LogicalType.TimestampType.class);
-        }
-        else if (type instanceof PqType.DecimalType) {
-            validateLogicalElement(LogicalType.DecimalType.class);
-        }
-        else if (type instanceof PqType.UuidType) {
-            validateLogicalElement(LogicalType.UuidType.class);
-        }
-        else if (type instanceof PqType.RowType) {
-            validateGroupElement(false, false);
-        }
-        else if (type instanceof PqType.ListType) {
-            validateGroupElement(true, false);
-        }
-        else if (type instanceof PqType.MapType) {
-            validateGroupElement(false, true);
+        switch (type) {
+            case PqType.BooleanType t -> validatePrimitiveElement(PhysicalType.BOOLEAN);
+            case PqType.Int32Type t -> validatePrimitiveElement(PhysicalType.INT32);
+            case PqType.Int64Type t -> validatePrimitiveElement(PhysicalType.INT64);
+            case PqType.FloatType t -> validatePrimitiveElement(PhysicalType.FLOAT);
+            case PqType.DoubleType t -> validatePrimitiveElement(PhysicalType.DOUBLE);
+            case PqType.BinaryType t -> validatePrimitiveElement(PhysicalType.BYTE_ARRAY, PhysicalType.FIXED_LEN_BYTE_ARRAY);
+            case PqType.StringType t -> validateStringElement();
+            case PqType.DateType t -> validateLogicalElement(LogicalType.DateType.class);
+            case PqType.TimeType t -> validateLogicalElement(LogicalType.TimeType.class);
+            case PqType.TimestampType t -> validateLogicalElement(LogicalType.TimestampType.class);
+            case PqType.DecimalType t -> validateLogicalElement(LogicalType.DecimalType.class);
+            case PqType.UuidType t -> validateLogicalElement(LogicalType.UuidType.class);
+            case PqType.RowType t -> validateGroupElement(false, false);
+            case PqType.ListType t -> validateGroupElement(true, false);
+            case PqType.MapType t -> validateGroupElement(false, true);
         }
     }
 
@@ -184,66 +155,24 @@ public class PqListImpl implements PqList {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private Object convertElement(Object rawValue, PqType<?> type) {
-        // Convert using instanceof checks (Java 17 compatible)
-        if (type instanceof PqType.BooleanType) {
-            return (Boolean) rawValue;
-        }
-        else if (type instanceof PqType.Int32Type) {
-            return (Integer) rawValue;
-        }
-        else if (type instanceof PqType.Int64Type) {
-            return (Long) rawValue;
-        }
-        else if (type instanceof PqType.FloatType) {
-            return (Float) rawValue;
-        }
-        else if (type instanceof PqType.DoubleType) {
-            return (Double) rawValue;
-        }
-        else if (type instanceof PqType.BinaryType) {
-            return (byte[]) rawValue;
-        }
-        else if (type instanceof PqType.StringType) {
-            if (rawValue instanceof String) {
-                return rawValue;
-            }
-            return new String((byte[]) rawValue, StandardCharsets.UTF_8);
-        }
-        else if (type instanceof PqType.DateType) {
-            return convertLogicalElement(rawValue, LocalDate.class);
-        }
-        else if (type instanceof PqType.TimeType) {
-            return convertLogicalElement(rawValue, LocalTime.class);
-        }
-        else if (type instanceof PqType.TimestampType) {
-            return convertLogicalElement(rawValue, Instant.class);
-        }
-        else if (type instanceof PqType.DecimalType) {
-            return convertLogicalElement(rawValue, BigDecimal.class);
-        }
-        else if (type instanceof PqType.UuidType) {
-            return convertLogicalElement(rawValue, UUID.class);
-        }
-        else if (type instanceof PqType.RowType) {
-            Object[] arrayValue = (Object[]) rawValue;
-            SchemaNode.GroupNode groupSchema = (SchemaNode.GroupNode) elementSchema;
-            return new PqRowImpl(arrayValue, groupSchema);
-        }
-        else if (type instanceof PqType.ListType) {
-            List<?> listValue = (List<?>) rawValue;
-            SchemaNode.GroupNode nestedListSchema = (SchemaNode.GroupNode) elementSchema;
-            return new PqListImpl(listValue, nestedListSchema);
-        }
-        else if (type instanceof PqType.MapType) {
-            List<?> mapValue = (List<?>) rawValue;
-            SchemaNode.GroupNode mapSchema = (SchemaNode.GroupNode) elementSchema;
-            return new PqMapImpl(mapValue, mapSchema);
-        }
-        else {
-            throw new IllegalArgumentException("Unknown PqType: " + type.getClass().getSimpleName());
-        }
+        return switch (type) {
+            case PqType.BooleanType t -> rawValue;
+            case PqType.Int32Type t -> rawValue;
+            case PqType.Int64Type t -> rawValue;
+            case PqType.FloatType t -> rawValue;
+            case PqType.DoubleType t -> rawValue;
+            case PqType.BinaryType t -> rawValue;
+            case PqType.StringType t -> rawValue instanceof String ? rawValue : new String((byte[]) rawValue, StandardCharsets.UTF_8);
+            case PqType.DateType t -> convertLogicalElement(rawValue, LocalDate.class);
+            case PqType.TimeType t -> convertLogicalElement(rawValue, LocalTime.class);
+            case PqType.TimestampType t -> convertLogicalElement(rawValue, Instant.class);
+            case PqType.DecimalType t -> convertLogicalElement(rawValue, BigDecimal.class);
+            case PqType.UuidType t -> convertLogicalElement(rawValue, UUID.class);
+            case PqType.RowType t -> new PqRowImpl((Object[]) rawValue, (SchemaNode.GroupNode) elementSchema);
+            case PqType.ListType t -> new PqListImpl((List<?>) rawValue, (SchemaNode.GroupNode) elementSchema);
+            case PqType.MapType t -> new PqMapImpl((List<?>) rawValue, (SchemaNode.GroupNode) elementSchema);
+        };
     }
 
     private <T> T convertLogicalElement(Object rawValue, Class<T> expectedClass) {

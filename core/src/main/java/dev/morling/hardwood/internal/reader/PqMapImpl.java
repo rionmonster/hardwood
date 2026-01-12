@@ -35,7 +35,6 @@ public class PqMapImpl implements PqMap {
      * @param rawEntries list of Object[] where each array is [key, value]
      * @param mapSchema the MAP schema node
      */
-    @SuppressWarnings("unchecked")
     public PqMapImpl(List<?> rawEntries, SchemaNode.GroupNode mapSchema) {
         if (rawEntries == null || rawEntries.isEmpty()) {
             this.entries = Collections.emptyList();
@@ -114,22 +113,22 @@ public class PqMapImpl implements PqMap {
 
             // Handle primitive types
             if (type instanceof PqType.BooleanType) {
-                return (Boolean) rawValue;
+                return rawValue;
             }
             else if (type instanceof PqType.Int32Type) {
-                return (Integer) rawValue;
+                return rawValue;
             }
             else if (type instanceof PqType.Int64Type) {
-                return (Long) rawValue;
+                return rawValue;
             }
             else if (type instanceof PqType.FloatType) {
-                return (Float) rawValue;
+                return rawValue;
             }
             else if (type instanceof PqType.DoubleType) {
-                return (Double) rawValue;
+                return rawValue;
             }
             else if (type instanceof PqType.BinaryType) {
-                return (byte[]) rawValue;
+                return rawValue;
             }
             else if (type instanceof PqType.StringType) {
                 if (rawValue instanceof String) {

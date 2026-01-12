@@ -33,34 +33,20 @@ public class LogicalTypeConverter {
             return physicalValue;
         }
 
-        if (logicalType instanceof LogicalType.StringType) {
-            return convertToString(physicalValue, physicalType);
-        }
-        else if (logicalType instanceof LogicalType.DateType) {
-            return convertToDate(physicalValue, physicalType);
-        }
-        else if (logicalType instanceof LogicalType.TimestampType tt) {
-            return convertToTimestamp(physicalValue, physicalType, tt);
-        }
-        else if (logicalType instanceof LogicalType.TimeType tt) {
-            return convertToTime(physicalValue, physicalType, tt);
-        }
-        else if (logicalType instanceof LogicalType.DecimalType dt) {
-            return convertToDecimal(physicalValue, physicalType, dt);
-        }
-        else if (logicalType instanceof LogicalType.IntType it) {
-            return convertToInt(physicalValue, physicalType, it);
-        }
-        else if (logicalType instanceof LogicalType.UuidType) {
-            return convertToUuid(physicalValue, physicalType);
-        }
-        else if (logicalType instanceof LogicalType.JsonType || logicalType instanceof LogicalType.BsonType) {
-            return convertToString(physicalValue, physicalType);
-        }
-        else {
-            // EnumType, ListType, MapType, IntervalType not supported yet
-            return physicalValue;
-        }
+        return switch (logicalType) {
+            case LogicalType.StringType t -> convertToString(physicalValue, physicalType);
+            case LogicalType.DateType t -> convertToDate(physicalValue, physicalType);
+            case LogicalType.TimestampType tt -> convertToTimestamp(physicalValue, physicalType, tt);
+            case LogicalType.TimeType tt -> convertToTime(physicalValue, physicalType, tt);
+            case LogicalType.DecimalType dt -> convertToDecimal(physicalValue, physicalType, dt);
+            case LogicalType.IntType it -> convertToInt(physicalValue, physicalType, it);
+            case LogicalType.UuidType t -> convertToUuid(physicalValue, physicalType);
+            case LogicalType.JsonType t -> convertToString(physicalValue, physicalType);
+            case LogicalType.BsonType t -> convertToString(physicalValue, physicalType);
+            // EnumType and IntervalType: pass through as-is (no conversion needed or not supported)
+            // ListType and MapType are structural types handled by RecordAssembler, not primitive conversions
+            default -> physicalValue;
+        };
     }
 
     private static String convertToString(Object value, PhysicalType physicalType) {

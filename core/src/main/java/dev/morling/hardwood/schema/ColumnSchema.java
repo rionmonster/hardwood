@@ -13,8 +13,8 @@ import dev.morling.hardwood.metadata.RepetitionType;
 import dev.morling.hardwood.row.PqType;
 
 /**
- * Represents a primitive column in a Parquet schema.
- * Stores computed definition and repetition levels based on schema hierarchy.
+ * Represents a primitive column in a Parquet schema. Stores computed definition
+ * and repetition levels based on schema hierarchy.
  */
 public record ColumnSchema(
         String name,
@@ -27,46 +27,35 @@ public record ColumnSchema(
         LogicalType logicalType) {
 
     /**
-     * Returns the corresponding PqType for this column based on its logical and physical types.
+     * Returns the corresponding PqType for this column based on its logical and
+     * physical types.
      */
     public PqType<?> toPqType() {
-        // Check logical type first
         if (logicalType != null) {
-            if (logicalType instanceof LogicalType.StringType) {
-                return PqType.STRING;
-            }
-            if (logicalType instanceof LogicalType.UuidType) {
-                return PqType.UUID;
-            }
-            if (logicalType instanceof LogicalType.DateType) {
-                return PqType.DATE;
-            }
-            if (logicalType instanceof LogicalType.TimeType) {
-                return PqType.TIME;
-            }
-            if (logicalType instanceof LogicalType.TimestampType) {
-                return PqType.TIMESTAMP;
-            }
-            if (logicalType instanceof LogicalType.DecimalType) {
-                return PqType.DECIMAL;
-            }
-            if (logicalType instanceof LogicalType.IntType intType) {
-                return intType.bitWidth() == 64 ? PqType.INT64 : PqType.INT32;
-            }
-            if (logicalType instanceof LogicalType.ListType) {
-                return PqType.LIST;
-            }
+            return switch (logicalType) {
+            case LogicalType.StringType t -> PqType.STRING;
+            case LogicalType.UuidType t -> PqType.UUID;
+            case LogicalType.DateType t -> PqType.DATE;
+            case LogicalType.TimeType t -> PqType.TIME;
+            case LogicalType.TimestampType t -> PqType.TIMESTAMP;
+            case LogicalType.DecimalType t -> PqType.DECIMAL;
+            case LogicalType.IntType intType -> intType.bitWidth() == 64 ? PqType.INT64 : PqType.INT32;
+            case LogicalType.ListType t -> PqType.LIST;
+            default -> toPqTypeFromPhysical();
+            };
         }
+        return toPqTypeFromPhysical();
+    }
 
-        // Fall back to physical type
+    private PqType<?> toPqTypeFromPhysical() {
         return switch (type) {
-            case BOOLEAN -> PqType.BOOLEAN;
-            case INT32 -> PqType.INT32;
-            case INT64 -> PqType.INT64;
-            case FLOAT -> PqType.FLOAT;
-            case DOUBLE -> PqType.DOUBLE;
-            case BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY -> PqType.BINARY;
-            default -> PqType.BINARY;
+        case BOOLEAN -> PqType.BOOLEAN;
+        case INT32 -> PqType.INT32;
+        case INT64 -> PqType.INT64;
+        case FLOAT -> PqType.FLOAT;
+        case DOUBLE -> PqType.DOUBLE;
+        case BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY -> PqType.BINARY;
+        default -> PqType.BINARY;
         };
     }
 

@@ -826,7 +826,7 @@ Remaining Failures by Category (8 total):
 
 ## Build
 
-This project requires Java 17 or newer for building.
+This project requires Java 21 or newer for building.
 It comes with the Apache [Maven wrapper](https://github.com/takari/maven-wrapper),
 i.e. a Maven distribution will be downloaded automatically, if needed.
 
