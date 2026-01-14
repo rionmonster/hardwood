@@ -12,6 +12,7 @@ import java.util.List;
 
 import dev.morling.hardwood.metadata.RepetitionType;
 import dev.morling.hardwood.metadata.SchemaElement;
+import dev.morling.hardwood.schema.SchemaNode.GroupNode;
 
 /**
  * Root schema container representing the complete Parquet schema.
@@ -22,11 +23,13 @@ public class FileSchema {
     private final String name;
     private final List<ColumnSchema> columns;
     private final SchemaNode.GroupNode rootNode;
+    private final List<FieldPath> fieldPaths;
 
-    private FileSchema(String name, List<ColumnSchema> columns, SchemaNode.GroupNode rootNode) {
+    private FileSchema(String name, List<ColumnSchema> columns, SchemaNode.GroupNode rootNode, List<FieldPath> fieldPaths) {
         this.name = name;
         this.columns = columns;
         this.rootNode = rootNode;
+        this.fieldPaths = fieldPaths;
     }
 
     public String getName() {
@@ -73,50 +76,8 @@ public class FileSchema {
         throw new IllegalArgumentException("Field not found: " + name);
     }
 
-    /**
-     * Check if a column (by index) needs raw mode reading for proper assembly.
-     * This includes columns in:
-     * - Lists that contain struct elements
-     * - MAPs (which have repeated key-value pairs)
-     * - Optional structs (to distinguish null struct from struct with null children)
-     */
-    public boolean isColumnInListOfStruct(int columnIndex) {
-        return needsRawMode(rootNode, columnIndex, false);
-    }
-
-    private boolean needsRawMode(SchemaNode node, int columnIndex, boolean ancestorNeedsRaw) {
-        if (node instanceof SchemaNode.PrimitiveNode prim) {
-            boolean result = prim.columnIndex() == columnIndex && ancestorNeedsRaw;
-            return result;
-        }
-
-        SchemaNode.GroupNode group = (SchemaNode.GroupNode) node;
-
-        // Check if this group requires raw mode for its descendants
-        boolean thisNeedsRaw = false;
-        if (group.isList()) {
-            SchemaNode element = group.getListElement();
-            if (element instanceof SchemaNode.GroupNode elementGroup && !elementGroup.isList()) {
-                // List element is a struct (group that's not a list)
-                thisNeedsRaw = true;
-            }
-        }
-        else if (group.isMap()) {
-            // MAPs have repeated key-value pairs that need multi-column correlation
-            thisNeedsRaw = true;
-        }
-        else if (group.repetitionType() == RepetitionType.OPTIONAL && !group.children().isEmpty()) {
-            // Optional structs need raw mode to distinguish null struct from struct with null children
-            thisNeedsRaw = true;
-        }
-
-        boolean combined = ancestorNeedsRaw || thisNeedsRaw;
-        for (SchemaNode child : group.children()) {
-            if (needsRawMode(child, columnIndex, combined)) {
-                return true;
-            }
-        }
-        return false;
+    public List<FieldPath> getFieldPaths() {
+        return fieldPaths;
     }
 
     /**
@@ -147,7 +108,9 @@ public class FileSchema {
                 0 // Root has rep level 0
         );
 
-        return new FileSchema(root.name(), columns, rootNode);
+        List<FieldPath> fieldPaths = buildFieldPaths(rootNode);
+
+        return new FileSchema(root.name(), columns, rootNode, fieldPaths);
     }
 
     /**
@@ -246,6 +209,51 @@ public class FileSchema {
         }
 
         return count;
+    }
+
+    // ==================== Field Path Building ====================
+
+    private static List<FieldPath> buildFieldPaths(GroupNode rootNode) {
+        List<FieldPath> paths = new ArrayList<>();
+        List<FieldPath.PathStep> currentPath = new ArrayList<>();
+        buildFieldPathsRecursive(rootNode, currentPath, paths, -1);
+        return paths;
+    }
+
+    private static void buildFieldPathsRecursive(SchemaNode node, List<FieldPath.PathStep> path,
+                                                  List<FieldPath> paths, int fieldIndexInParent) {
+        if (node instanceof SchemaNode.PrimitiveNode prim) {
+            paths.add(new FieldPath(
+                    path.toArray(new FieldPath.PathStep[0]),
+                    fieldIndexInParent,
+                    prim.maxDefinitionLevel(),
+                    prim.maxRepetitionLevel()
+            ));
+            return;
+        }
+
+        SchemaNode.GroupNode group = (SchemaNode.GroupNode) node;
+
+        for (int i = 0; i < group.children().size(); i++) {
+            SchemaNode child = group.children().get(i);
+
+            boolean childIsList = child instanceof SchemaNode.GroupNode g && g.isList();
+            boolean childIsMap = child instanceof SchemaNode.GroupNode g && g.isMap();
+
+            FieldPath.PathStep step = new FieldPath.PathStep(
+                    i,
+                    child.maxDefinitionLevel(),
+                    child.maxRepetitionLevel(),
+                    child.repetitionType() == RepetitionType.REPEATED,
+                    childIsList,
+                    childIsMap,
+                    child instanceof SchemaNode.GroupNode g ? g.children().size() : 0
+            );
+
+            path.add(step);
+            buildFieldPathsRecursive(child, path, paths, i);
+            path.remove(path.size() - 1);
+        }
     }
 
     @Override

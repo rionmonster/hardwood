@@ -20,11 +20,9 @@ import java.util.concurrent.ExecutorService;
 import dev.morling.hardwood.internal.reader.ColumnBatch;
 import dev.morling.hardwood.internal.reader.PqRowImpl;
 import dev.morling.hardwood.internal.reader.RecordAssembler;
-import dev.morling.hardwood.internal.reader.SimpleColumnBatch;
 import dev.morling.hardwood.metadata.RowGroup;
 import dev.morling.hardwood.row.PqRow;
 import dev.morling.hardwood.schema.FileSchema;
-import dev.morling.hardwood.schema.SchemaNode;
 
 /**
  * Provides row-oriented iteration over a Parquet file.
@@ -133,15 +131,12 @@ public class RowReader implements Iterable<PqRow>, AutoCloseable {
             initializeCurrentRowGroupReaders();
         }
 
-        // Create futures for parallel batch fetching
+        // Create futures for parallel batch fetching (always use raw mode)
         List<CompletableFuture<ColumnBatch>> futures = new ArrayList<>();
-        for (int i = 0; i < currentColumnReaders.size(); i++) {
-            ColumnReader reader = currentColumnReaders.get(i);
-            // Use raw mode for columns in nested structures to enable proper assembly
-            boolean rawMode = schema.isColumnInListOfStruct(i);
+        for (ColumnReader reader : currentColumnReaders) {
             CompletableFuture<ColumnBatch> future = CompletableFuture.supplyAsync(() -> {
                 try {
-                    return reader.readBatch(batchSize, rawMode);
+                    return reader.readBatch(batchSize);
                 }
                 catch (IOException e) {
                     throw new UncheckedIOException(e);
@@ -183,18 +178,6 @@ public class RowReader implements Iterable<PqRow>, AutoCloseable {
         closed = true;
         // Note: We don't shut down the executor here as it may be shared
         // The caller (ParquetFileReader) is responsible for managing the executor lifecycle
-    }
-
-    /**
-     * Check if schema has nested fields (structs or lists).
-     */
-    private boolean hasNestedFields() {
-        for (SchemaNode child : schema.getRootNode().children()) {
-            if (child instanceof SchemaNode.GroupNode) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -242,21 +225,9 @@ public class RowReader implements Iterable<PqRow>, AutoCloseable {
                 throw new NoSuchElementException("No more rows available");
             }
 
-            Object[] rowValues;
-
-            // Check if this is a nested schema (has struct or list fields)
-            if (hasNestedFields()) {
-                // Use RecordAssembler for nested schemas
-                RecordAssembler assembler = new RecordAssembler(schema);
-                rowValues = assembler.assembleRow(currentBatches, currentBatchPosition);
-            }
-            else {
-                // Simple flat schema - direct assembly
-                rowValues = new Object[currentColumnReaders.size()];
-                for (int i = 0; i < currentColumnReaders.size(); i++) {
-                    rowValues[i] = ((SimpleColumnBatch) currentBatches.get(i)).get(currentBatchPosition);
-                }
-            }
+            // Use RecordAssembler to assemble row from raw column batches
+            RecordAssembler assembler = new RecordAssembler(schema);
+            Object[] rowValues = assembler.assembleRow(currentBatches, currentBatchPosition);
 
             currentBatchPosition++;
             totalRowsRead++;

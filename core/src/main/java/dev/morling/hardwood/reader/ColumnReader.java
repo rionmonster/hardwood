@@ -15,8 +15,6 @@ import java.util.List;
 import dev.morling.hardwood.internal.conversion.LogicalTypeConverter;
 import dev.morling.hardwood.internal.reader.ColumnBatch;
 import dev.morling.hardwood.internal.reader.PageReader;
-import dev.morling.hardwood.internal.reader.RawColumnBatch;
-import dev.morling.hardwood.internal.reader.SimpleColumnBatch;
 import dev.morling.hardwood.metadata.ColumnChunk;
 import dev.morling.hardwood.metadata.ColumnMetaData;
 import dev.morling.hardwood.schema.ColumnSchema;
@@ -244,39 +242,13 @@ public class ColumnReader {
 
     /**
      * Read a batch of values from this column.
-     * Returns up to batchSize values, or fewer if end of column is reached.
-     */
-    ColumnBatch readBatch(int batchSize) throws IOException {
-        return readBatch(batchSize, false);
-    }
-
-    /**
-     * Read a batch of values from this column.
+     * Returns raw values with their definition and repetition levels,
+     * allowing the caller to assemble nested structures.
      *
      * @param batchSize maximum number of records to read
-     * @param rawMode if true, returns raw values with levels instead of pre-assembled lists
-     *                (used for multi-column list assembly)
+     * @return ColumnBatch with values and levels for up to batchSize records
      */
-    ColumnBatch readBatch(int batchSize, boolean rawMode) throws IOException {
-        if (rawMode) {
-            return readBatchRaw(batchSize);
-        }
-
-        Object[] values = new Object[batchSize];
-        int count = 0;
-
-        while (count < batchSize && hasNext()) {
-            values[count++] = readNext();
-        }
-
-        return new SimpleColumnBatch(values, count, column);
-    }
-
-    /**
-     * Read a batch in raw mode, returning individual values with their levels.
-     * Used for list-of-struct assembly where we need to correlate across columns.
-     */
-    private RawColumnBatch readBatchRaw(int batchSize) throws IOException {
+    ColumnBatch readBatch(int batchSize) throws IOException {
         List<Object> rawValues = new ArrayList<>();
         List<Integer> defLevels = new ArrayList<>();
         List<Integer> repLevels = new ArrayList<>();
@@ -304,7 +276,7 @@ public class ColumnReader {
             recordCount++;
         }
 
-        return new RawColumnBatch(
+        return new ColumnBatch(
                 rawValues.toArray(),
                 defLevels.stream().mapToInt(Integer::intValue).toArray(),
                 repLevels.stream().mapToInt(Integer::intValue).toArray(),
