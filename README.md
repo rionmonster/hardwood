@@ -352,6 +352,13 @@ parquet-java         |      84.31 |        43,991,423 |    303,521,661.96 |    8
 Note that Hardwood parallelizes processing of column batches across CPU cores; hence, the absolute result is better
 than parquet-java, but per-core performance is worse. No optimizations have been made at this point.
 
+```
+=== Performance Test Results (2026-01-18, avoiding some copying) ===
+Contender            |   Time (s) |   passenger_count |     trip_distance |       fare_amount
+---------------------+------------+-------------------+-------------------+------------------
+Hardwood             |      18.73 |        43,991,423 |    303,521,540.36 |    801,792,434.75
+```
+
 ## Implementation Status & Roadmap
 
 A from-scratch implementation of Apache Parquet reader/writer in Java with no dependencies except compression libraries.

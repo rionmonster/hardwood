@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import dev.morling.hardwood.internal.conversion.LogicalTypeConverter;
@@ -253,6 +254,18 @@ public class ColumnReader {
     }
 
     /**
+     * Get the current page, loading next page if needed.
+     * Returns null if no more pages.
+     */
+    private PageReader.Page getCurrentPage() throws IOException {
+        if (currentPage == null || currentPagePosition >= currentPage.numValues()) {
+            currentPage = pageReader.readPage();
+            currentPagePosition = 0;
+        }
+        return currentPage;
+    }
+
+    /**
      * Read a batch of values from this column.
      * Returns raw values with their definition and repetition levels,
      * allowing the caller to assemble nested structures.
@@ -261,37 +274,95 @@ public class ColumnReader {
      * @return ColumnBatch with values and levels for up to batchSize records
      */
     ColumnBatch readBatch(int batchSize) throws IOException {
-        List<Object> rawValues = new ArrayList<>();
-        List<Integer> defLevels = new ArrayList<>();
-        List<Integer> repLevels = new ArrayList<>();
+        // Use primitive arrays that grow as needed
+        int capacity = batchSize * 2;  // Initial capacity, will grow if needed
+        Object[] values = new Object[capacity];
+        int[] defLevels = new int[capacity];
+        int[] repLevels = new int[capacity];
+        int valueCount = 0;
         int recordCount = 0;
 
+        // Handle any lookahead value from previous batch
+        if (lookahead != null) {
+            values[0] = lookahead.value;
+            defLevels[0] = lookahead.defLevel;
+            repLevels[0] = lookahead.repLevel;
+            valueCount = 1;
+            lookahead = null;
+        }
+
         while (recordCount < batchSize && hasNext()) {
-            // Read all values for this record (until next rep=0)
-            ValueWithLevels v = nextValue();
-            if (v == null) {
+            PageReader.Page page = getCurrentPage();
+            if (page == null) {
                 break;
             }
 
-            rawValues.add(v.value);
-            defLevels.add(v.defLevel);
-            repLevels.add(v.repLevel);
+            int pageStart = currentPagePosition;
+            int pageEnd = page.numValues();
 
-            // Continue reading while rep > 0 (same record)
-            while (peekRepLevel() > 0) {
-                v = nextValue();
-                rawValues.add(v.value);
-                defLevels.add(v.defLevel);
-                repLevels.add(v.repLevel);
+            // Find how many values to take: scan for record boundaries
+            int endPos = pageEnd;
+            int recordsFound = 0;
+
+            for (int i = pageStart; i < pageEnd; i++) {
+                int rep = page.repetitionLevels() != null ? page.repetitionLevels()[i] : 0;
+                if (rep == 0 && (valueCount > 0 || i > pageStart)) {
+                    // Start of a new record
+                    recordsFound++;
+                    if (recordCount + recordsFound >= batchSize) {
+                        endPos = i;
+                        break;
+                    }
+                }
             }
 
-            recordCount++;
+            int copyCount = endPos - pageStart;
+
+            // Grow arrays if needed
+            if (valueCount + copyCount > values.length) {
+                int newCapacity = Math.max(values.length * 2, valueCount + copyCount);
+                values = Arrays.copyOf(values, newCapacity);
+                defLevels = Arrays.copyOf(defLevels, newCapacity);
+                repLevels = Arrays.copyOf(repLevels, newCapacity);
+            }
+
+            // Copy values directly from page arrays
+            System.arraycopy(page.values(), pageStart, values, valueCount, copyCount);
+            if (page.definitionLevels() != null) {
+                System.arraycopy(page.definitionLevels(), pageStart, defLevels, valueCount, copyCount);
+            }
+            if (page.repetitionLevels() != null) {
+                System.arraycopy(page.repetitionLevels(), pageStart, repLevels, valueCount, copyCount);
+            }
+
+            // Count records in copied portion
+            for (int i = 0; i < copyCount; i++) {
+                int rep = page.repetitionLevels() != null ? page.repetitionLevels()[pageStart + i] : 0;
+                if (rep == 0 && (valueCount + i) > 0) {
+                    recordCount++;
+                }
+            }
+            // Count the first record if this is the start
+            if (valueCount == 0 && copyCount > 0) {
+                recordCount++;
+            }
+
+            // Update position
+            currentPagePosition = endPos;
+            valuesRead += copyCount;
+            valueCount += copyCount;
+
+            // If we hit the batch limit mid-page, stop
+            if (endPos < pageEnd) {
+                break;
+            }
         }
 
+        // Trim arrays to actual size
         return new ColumnBatch(
-                rawValues.toArray(),
-                defLevels.stream().mapToInt(Integer::intValue).toArray(),
-                repLevels.stream().mapToInt(Integer::intValue).toArray(),
+                valueCount == values.length ? values : Arrays.copyOf(values, valueCount),
+                valueCount == defLevels.length ? defLevels : Arrays.copyOf(defLevels, valueCount),
+                valueCount == repLevels.length ? repLevels : Arrays.copyOf(repLevels, valueCount),
                 recordCount,
                 column);
     }
