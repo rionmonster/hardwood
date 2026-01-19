@@ -95,7 +95,7 @@ public class ColumnarPqRowImpl implements PqRow {
         if (isNullAt(batch, col)) {
             throw new NullPointerException("Field '" + name + "' is null");
         }
-        return (Float) batch.getValues()[rowIndex];
+        return (Float) getObjectValue(batch);
     }
 
     @Override
@@ -120,7 +120,7 @@ public class ColumnarPqRowImpl implements PqRow {
         if (isNullAt(batch, col)) {
             throw new NullPointerException("Field '" + name + "' is null");
         }
-        return (Boolean) batch.getValues()[rowIndex];
+        return (Boolean) getObjectValue(batch);
     }
 
     // ==================== Object Types ====================
