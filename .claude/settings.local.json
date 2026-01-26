@@ -64,7 +64,21 @@
       "WebFetch(domain:mvnrepository.com)",
       "Bash(mvn test:*)",
       "WebFetch(domain:www.nyc.gov)",
-      "Bash(../mvnw test:*)"
+      "Bash(../mvnw test:*)",
+      "WebFetch(domain:0x80.pl)",
+      "Bash(cut:*)",
+      "Bash(for i in 1 2 3)",
+      "Bash(do echo \"=== Run $i ===\")",
+      "Bash(done)",
+      "Bash(awk:*)",
+      "Bash(pkill:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"{}\"\"; java -jar ~/.m2/repository/org/apache/parquet/parquet-cli/1.16.0/parquet-cli-1.16.0.jar head -n 1 {} 2>&1 | head -1')",
+      "Bash(do)",
+      "Bash(echo:*)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(kill:*)",
+      "Bash(xargs:*)"
     ]
   }
 }

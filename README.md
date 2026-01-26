@@ -400,6 +400,13 @@ Performance:
   Hardwood                     2.24      19,793,938          1,237,121        321.4
 ```
 
+```
+Performance Test Results (2026-01-26, Adaptive page pre-fetching) ===
+  Contender                Time (s)     Records/sec   Records/sec/core       MB/sec
+  -------------------------------------------------------------------------------------
+  Hardwood                     1.87      23,790,892          1,486,931        386.3
+```
+
 ## Implementation Status & Roadmap
 
 A from-scratch implementation of Apache Parquet reader/writer in Java with no dependencies except compression libraries.

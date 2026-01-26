@@ -16,6 +16,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import dev.morling.hardwood.internal.thrift.FileMetaDataReader;
 import dev.morling.hardwood.internal.thrift.ThriftCompactReader;
@@ -34,13 +37,19 @@ public class ParquetFileReader implements AutoCloseable {
     private static final int FOOTER_LENGTH_SIZE = 4;
     private static final int MAGIC_SIZE = 4;
 
+    private final Path path;
     private final FileChannel channel;
     private final FileMetaData fileMetaData;
+    private final ExecutorService executor;
 
-    private ParquetFileReader(FileChannel channel, FileMetaData fileMetaData) {
+    private ParquetFileReader(Path path, FileChannel channel, FileMetaData fileMetaData) {
+        this.path = path;
         this.channel = channel;
         this.fileMetaData = fileMetaData;
-        // Create executor with thread count = available processors
+
+        // Use virtual threads to handle nested parallelism (column-level + page-level)
+        // without deadlocking on a fixed-size thread pool
+        this.executor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     public static ParquetFileReader open(Path path) throws IOException {
@@ -85,7 +94,7 @@ public class ParquetFileReader implements AutoCloseable {
             ThriftCompactReader reader = new ThriftCompactReader(new ByteArrayInputStream(footerBuf.array()));
             FileMetaData fileMetaData = FileMetaDataReader.read(reader);
 
-            return new ParquetFileReader(channel, fileMetaData);
+            return new ParquetFileReader(path, channel, fileMetaData);
         }
         catch (Exception e) {
             // Close channel if there was an error during initialization
@@ -121,7 +130,7 @@ public class ParquetFileReader implements AutoCloseable {
     }
 
     public ColumnReader getColumnReader(ColumnSchema idColumn, ColumnChunk idColumnChunk) throws IOException {
-        return new ColumnReader(channel, idColumn, idColumnChunk);
+        return new ColumnReader(path, idColumn, idColumnChunk);
     }
 
     /**
@@ -129,12 +138,20 @@ public class ParquetFileReader implements AutoCloseable {
      */
     public RowReader createRowReader() {
         FileSchema schema = getFileSchema();
-        long totalRows = fileMetaData.numRows();
-        return new RowReader(schema, channel, fileMetaData.rowGroups(), totalRows);
+        return new RowReader(schema, channel, fileMetaData.rowGroups(), executor, path.getFileName().toString());
     }
 
     @Override
     public void close() throws IOException {
+        // Shutdown executor
+        executor.shutdownNow();
+        try {
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
         // Close channel
         channel.close();
     }

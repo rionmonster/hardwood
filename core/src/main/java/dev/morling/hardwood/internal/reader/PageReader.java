@@ -53,6 +53,58 @@ public class PageReader {
     }
 
     /**
+     * Constructor for single-page decoding with a pre-parsed dictionary.
+     * Used by decodeSinglePage for parallel page processing.
+     * The buffer is not used for single-page decoding (can be null).
+     */
+    private PageReader(ColumnMetaData columnMetaData, ColumnSchema column, Dictionary dictionary) {
+        this.mappedBuffer = null;
+        this.columnMetaData = columnMetaData;
+        this.column = column;
+        this.dictionary = dictionary;
+    }
+
+    /**
+     * Decode a single data page from the mapped buffer.
+     * The buffer should be positioned at the start of the page (including header).
+     * Used by PageDecoderWorker for parallel page processing.
+     *
+     * @param pageBuffer buffer containing just this page (header + data)
+     * @param columnMetaData metadata for the column
+     * @param column column schema
+     * @param dictionary pre-parsed dictionary, or null if not dictionary-encoded
+     * @return decoded page
+     */
+    public static Page decodeSinglePage(ByteBuffer pageBuffer, ColumnMetaData columnMetaData,
+                                        ColumnSchema column, Dictionary dictionary) throws IOException {
+        // Parse page header
+        ByteBufferInputStream headerStream = new ByteBufferInputStream(pageBuffer, 0);
+        ThriftCompactReader headerReader = new ThriftCompactReader(headerStream);
+        PageHeader pageHeader = PageHeaderReader.read(headerReader);
+        int headerSize = headerStream.getBytesRead();
+
+        // Read page data
+        int compressedSize = pageHeader.compressedPageSize();
+        byte[] pageData = new byte[compressedSize];
+        pageBuffer.slice(headerSize, compressedSize).get(pageData);
+
+        // Create a temporary PageReader instance for parsing
+        PageReader reader = new PageReader(columnMetaData, column, dictionary);
+
+        return switch (pageHeader.type()) {
+            case DATA_PAGE -> {
+                Decompressor decompressor = DecompressorFactory.getDecompressor(columnMetaData.codec());
+                byte[] uncompressedData = decompressor.decompress(pageData, pageHeader.uncompressedPageSize());
+                yield reader.parseDataPage(pageHeader.dataPageHeader(), uncompressedData);
+            }
+            case DATA_PAGE_V2 -> {
+                yield reader.parseDataPageV2(pageHeader.dataPageHeaderV2(), pageData, pageHeader.uncompressedPageSize());
+            }
+            default -> throw new IOException("Unexpected page type for single-page decode: " + pageHeader.type());
+        };
+    }
+
+    /**
      * Read the next page. Returns null if no more pages.
      * Reads directly from memory-mapped buffer - thread-safe with no system calls.
      */
@@ -62,7 +114,7 @@ public class PageReader {
         }
 
         // Create a slice of the mapped buffer starting at current position for header parsing
-        MappedByteBufferInputStream headerStream = new MappedByteBufferInputStream(mappedBuffer, currentPosition);
+        ByteBufferInputStream headerStream = new ByteBufferInputStream(mappedBuffer, currentPosition);
         ThriftCompactReader headerReader = new ThriftCompactReader(headerStream);
         PageHeader pageHeader = PageHeaderReader.read(headerReader);
         int headerSize = headerStream.getBytesRead();
@@ -195,15 +247,15 @@ public class PageReader {
     }
 
     /**
-     * InputStream that reads from a MappedByteBuffer at a given offset.
+     * InputStream that reads from a ByteBuffer at a given offset.
      * Tracks bytes read for determining header size.
      */
-    private static class MappedByteBufferInputStream extends InputStream {
-        private final MappedByteBuffer buffer;
+    static class ByteBufferInputStream extends InputStream {
+        private final ByteBuffer buffer;
         private final int startOffset;
         private int pos;
 
-        public MappedByteBufferInputStream(MappedByteBuffer buffer, int startOffset) {
+        public ByteBufferInputStream(ByteBuffer buffer, int startOffset) {
             this.buffer = buffer;
             this.startOffset = startOffset;
             this.pos = startOffset;

@@ -7,97 +7,195 @@
  */
 package dev.morling.hardwood.internal.reader;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 import dev.morling.hardwood.schema.ColumnSchema;
 
 /**
- * Reads column values from pages and prefetches them into batches.
+ * Reads column values from pages and prefetches them into TypedColumnData batches.
  *
- * <p>This class fetches pages from the PageReader and provides batch prefetching
- * for efficient columnar access. For flat schemas, use {@link #prefetchTypedFlat(int)}
- * which copies directly into typed primitive arrays. For nested schemas, use
- * {@link #prefetch(int)} which handles repetition levels.</p>
+ * <p>This class uses async prefetching with adaptive depth to ensure that
+ * TypedColumnData is typically ready before it's needed. The prefetch depth
+ * automatically adapts based on whether batches are ready when requested:</p>
+ * <ul>
+ *   <li>If prefetch() finds the batch ready (hit), depth may decrease</li>
+ *   <li>If prefetch() has to wait for a batch (miss), depth increases</li>
+ * </ul>
+ *
+ * <p>For flat schemas, use {@link #prefetch(int)} which copies directly into
+ * typed primitive arrays. For nested schemas, it handles repetition levels.</p>
  */
 public class ColumnValueIterator {
 
-    private final PageReader pageReader;
+    private static final System.Logger LOG = System.getLogger(ColumnValueIterator.class.getName());
+
+    private static final int INITIAL_PREFETCH_DEPTH = 1;
+    private static final int MAX_PREFETCH_DEPTH = 4;
+    private static final int HITS_TO_DECREASE = 10;
+    private static final int MISSES_TO_INCREASE = 1;
+
+    private final PageCursor pageCursor;
     private final ColumnSchema column;
+    private final Executor executor;
     private final int maxDefinitionLevel;
-    private final long totalValues;
 
     private Page currentPage;
     private int position;
     private int currentRecordStart;
-    private long valuesRead;
     private boolean recordActive;
 
-    public ColumnValueIterator(PageReader pageReader, ColumnSchema column, long totalValues) {
-        this.pageReader = pageReader;
+    // Async prefetch state
+    private final Deque<CompletableFuture<TypedColumnData>> prefetchQueue = new ArrayDeque<>();
+    private int prefetchBatchSize;
+    private int targetPrefetchDepth = INITIAL_PREFETCH_DEPTH;
+    private int hitCount = 0;
+    private int missCount = 0;
+    private boolean exhausted = false;
+
+    public ColumnValueIterator(PageCursor pageCursor, ColumnSchema column, Executor executor) {
+        this.pageCursor = pageCursor;
         this.column = column;
+        this.executor = executor;
         this.maxDefinitionLevel = column.maxDefinitionLevel();
-        this.totalValues = totalValues;
     }
 
     // ==================== Batch Prefetch ====================
 
     /**
      * Prefetch values for up to {@code maxRecords} records into typed arrays.
+     * Uses async prefetching to ensure the next batch is typically ready.
      *
      * @param maxRecords maximum number of records to prefetch
      * @return typed column data containing values, levels, and record boundaries
      */
     public TypedColumnData prefetch(int maxRecords) {
-        if (column.maxRepetitionLevel() == 0) {
-            return prefetchTypedFlat(maxRecords);
+        if (exhausted) {
+            return emptyTypedColumnData();
         }
-        return prefetchNested(maxRecords);
+
+        TypedColumnData result;
+
+        // Check if we have a prefetched batch ready
+        if (!prefetchQueue.isEmpty() && prefetchBatchSize == maxRecords) {
+            CompletableFuture<TypedColumnData> future = prefetchQueue.pollFirst();
+
+            if (future.isDone()) {
+                // Hit: prefetch was ready
+                hitCount++;
+                missCount = 0;
+                if (hitCount >= HITS_TO_DECREASE && targetPrefetchDepth > INITIAL_PREFETCH_DEPTH) {
+                    targetPrefetchDepth--;
+                    hitCount = 0;
+                    LOG.log(System.Logger.Level.DEBUG, "Decreasing prefetch depth for column ''{0}'' to {1}",
+                            column.name(), targetPrefetchDepth);
+                }
+            }
+            else {
+                // Miss: had to wait
+                LOG.log(System.Logger.Level.DEBUG, "Prefetch miss for column ''{0}'', current depth={1}",
+                        column.name(), targetPrefetchDepth);
+                missCount++;
+                hitCount = 0;
+                if (missCount >= MISSES_TO_INCREASE && targetPrefetchDepth < MAX_PREFETCH_DEPTH) {
+                    targetPrefetchDepth++;
+                    LOG.log(System.Logger.Level.DEBUG, "Increasing prefetch depth for column ''{0}'' to {1}",
+                            column.name(), targetPrefetchDepth);
+                    missCount = 0;
+                }
+            }
+
+            result = future.join();
+        }
+        else {
+            // No prefetch available or wrong batch size - clear queue and compute synchronously
+            LOG.log(System.Logger.Level.DEBUG, "Prefetch queue empty for column ''{0}'', computing synchronously",
+                    column.name());
+            prefetchQueue.clear();
+            result = computeBatch(maxRecords);
+        }
+
+        if (result.recordCount() == 0) {
+            exhausted = true;
+        }
+        else {
+            // Fill prefetch queue up to target depth
+            fillPrefetchQueue(maxRecords);
+        }
+
+        return result;
     }
 
     /**
-     * Prefetch values for flat columns into typed primitive arrays.
-     * This avoids boxing overhead for primitive types (int, long, double, etc.).
-     * <p>
-     * Only valid for columns with maxRepetitionLevel == 0 (non-repeated columns).
-     * </p>
-     *
-     * @param maxRecords maximum number of records to prefetch
-     * @return typed prefetched column data with primitive arrays
-     * @throws IllegalStateException if the column has repetition (nested/repeated)
+     * Fill the prefetch queue up to targetPrefetchDepth.
+     * Batches are chained sequentially since each depends on state from the previous.
      */
-    public TypedColumnData prefetchTypedFlat(int maxRecords) {
-        if (column.maxRepetitionLevel() != 0) {
-            throw new IllegalStateException("prefetchTypedFlat() only valid for flat columns, " +
-                    "column " + column.name() + " has maxRepetitionLevel=" + column.maxRepetitionLevel());
+    private void fillPrefetchQueue(int maxRecords) {
+        prefetchBatchSize = maxRecords;
+        int toAdd = targetPrefetchDepth - prefetchQueue.size();
+        for (int i = 0; i < toAdd && !exhausted; i++) {
+            // Chain each batch after the previous one to maintain sequential computation
+            CompletableFuture<TypedColumnData> previous = prefetchQueue.peekLast();
+            CompletableFuture<TypedColumnData> next;
+            if (previous == null) {
+                // First in queue - start immediately
+                next = CompletableFuture.supplyAsync(() -> computeBatch(maxRecords), executor);
+            }
+            else {
+                // Chain after previous batch completes
+                next = previous.thenApplyAsync(ignored -> computeBatch(maxRecords), executor);
+            }
+            prefetchQueue.addLast(next);
         }
+    }
 
+    /**
+     * Compute a batch synchronously from current state.
+     */
+    private TypedColumnData computeBatch(int maxRecords) {
+        if (column.maxRepetitionLevel() == 0) {
+            return computeFlatBatch(maxRecords);
+        }
+        return computeNestedBatch(maxRecords);
+    }
+
+    /**
+     * Return an empty TypedColumnData based on the column's physical type.
+     */
+    private TypedColumnData emptyTypedColumnData() {
         int maxDefLevel = column.maxDefinitionLevel();
-
-        // Dispatch based on current page type to determine which typed array to use
-        if (!ensurePageLoaded()) {
-            // No data available - return empty typed column based on physical type
-            return switch (column.type()) {
-                case INT32 -> new TypedColumnData.IntColumn(column, new int[0], new int[0], maxDefLevel, 0);
-                case INT64 -> new TypedColumnData.LongColumn(column, new long[0], new int[0], maxDefLevel, 0);
-                case FLOAT -> new TypedColumnData.FloatColumn(column, new float[0], new int[0], maxDefLevel, 0);
-                case DOUBLE -> new TypedColumnData.DoubleColumn(column, new double[0], new int[0], maxDefLevel, 0);
-                case BOOLEAN -> new TypedColumnData.BooleanColumn(column, new boolean[0], new int[0], maxDefLevel, 0);
-                case BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY, INT96 -> new TypedColumnData.ByteArrayColumn(column, new byte[0][], new int[0], maxDefLevel, 0);
-            };
-        }
-
-        return switch (currentPage) {
-            case Page.IntPage p -> prefetchTypedInt(maxRecords, maxDefLevel);
-            case Page.LongPage p -> prefetchTypedLong(maxRecords, maxDefLevel);
-            case Page.FloatPage p -> prefetchTypedFloat(maxRecords, maxDefLevel);
-            case Page.DoublePage p -> prefetchTypedDouble(maxRecords, maxDefLevel);
-            case Page.BooleanPage p -> prefetchTypedBoolean(maxRecords, maxDefLevel);
-            case Page.ByteArrayPage p -> prefetchTypedByteArray(maxRecords, maxDefLevel);
+        return switch (column.type()) {
+            case INT32 -> new TypedColumnData.IntColumn(column, new int[0], new int[0], maxDefLevel, 0);
+            case INT64 -> new TypedColumnData.LongColumn(column, new long[0], new int[0], maxDefLevel, 0);
+            case FLOAT -> new TypedColumnData.FloatColumn(column, new float[0], new int[0], maxDefLevel, 0);
+            case DOUBLE -> new TypedColumnData.DoubleColumn(column, new double[0], new int[0], maxDefLevel, 0);
+            case BOOLEAN -> new TypedColumnData.BooleanColumn(column, new boolean[0], new int[0], maxDefLevel, 0);
+            case BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY, INT96 -> new TypedColumnData.ByteArrayColumn(column, new byte[0][], new int[0], maxDefLevel, 0);
         };
     }
 
-    private TypedColumnData prefetchTypedInt(int maxRecords, int maxDefLevel) {
+    // ==================== Flat Batch Computation ====================
+
+    private TypedColumnData computeFlatBatch(int maxRecords) {
+        int maxDefLevel = column.maxDefinitionLevel();
+
+        if (!ensurePageLoaded()) {
+            return emptyTypedColumnData();
+        }
+
+        return switch (currentPage) {
+            case Page.IntPage p -> computeFlatInt(maxRecords, maxDefLevel);
+            case Page.LongPage p -> computeFlatLong(maxRecords, maxDefLevel);
+            case Page.FloatPage p -> computeFlatFloat(maxRecords, maxDefLevel);
+            case Page.DoublePage p -> computeFlatDouble(maxRecords, maxDefLevel);
+            case Page.BooleanPage p -> computeFlatBoolean(maxRecords, maxDefLevel);
+            case Page.ByteArrayPage p -> computeFlatByteArray(maxRecords, maxDefLevel);
+        };
+    }
+
+    private TypedColumnData computeFlatInt(int maxRecords, int maxDefLevel) {
         int[] values = new int[maxRecords];
         int[] defLevels = maxDefLevel > 0 ? new int[maxRecords] : null;
 
@@ -113,7 +211,6 @@ public class ColumnValueIterator {
             }
 
             position += toCopy;
-            valuesRead += toCopy;
             recordCount += toCopy;
         }
 
@@ -127,7 +224,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.IntColumn(column, values, defLevels, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchTypedLong(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeFlatLong(int maxRecords, int maxDefLevel) {
         long[] values = new long[maxRecords];
         int[] defLevels = maxDefLevel > 0 ? new int[maxRecords] : null;
 
@@ -143,7 +240,6 @@ public class ColumnValueIterator {
             }
 
             position += toCopy;
-            valuesRead += toCopy;
             recordCount += toCopy;
         }
 
@@ -157,7 +253,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.LongColumn(column, values, defLevels, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchTypedFloat(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeFlatFloat(int maxRecords, int maxDefLevel) {
         float[] values = new float[maxRecords];
         int[] defLevels = maxDefLevel > 0 ? new int[maxRecords] : null;
 
@@ -173,7 +269,6 @@ public class ColumnValueIterator {
             }
 
             position += toCopy;
-            valuesRead += toCopy;
             recordCount += toCopy;
         }
 
@@ -187,7 +282,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.FloatColumn(column, values, defLevels, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchTypedDouble(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeFlatDouble(int maxRecords, int maxDefLevel) {
         double[] values = new double[maxRecords];
         int[] defLevels = maxDefLevel > 0 ? new int[maxRecords] : null;
 
@@ -203,7 +298,6 @@ public class ColumnValueIterator {
             }
 
             position += toCopy;
-            valuesRead += toCopy;
             recordCount += toCopy;
         }
 
@@ -217,7 +311,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.DoubleColumn(column, values, defLevels, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchTypedBoolean(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeFlatBoolean(int maxRecords, int maxDefLevel) {
         boolean[] values = new boolean[maxRecords];
         int[] defLevels = maxDefLevel > 0 ? new int[maxRecords] : null;
 
@@ -233,7 +327,6 @@ public class ColumnValueIterator {
             }
 
             position += toCopy;
-            valuesRead += toCopy;
             recordCount += toCopy;
         }
 
@@ -247,7 +340,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.BooleanColumn(column, values, defLevels, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchTypedByteArray(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeFlatByteArray(int maxRecords, int maxDefLevel) {
         byte[][] values = new byte[maxRecords][];
         int[] defLevels = maxDefLevel > 0 ? new int[maxRecords] : null;
 
@@ -263,7 +356,6 @@ public class ColumnValueIterator {
             }
 
             position += toCopy;
-            valuesRead += toCopy;
             recordCount += toCopy;
         }
 
@@ -277,15 +369,12 @@ public class ColumnValueIterator {
         return new TypedColumnData.ByteArrayColumn(column, values, defLevels, maxDefLevel, recordCount);
     }
 
-    /**
-     * Prefetch for nested/repeated columns: variable values per record.
-     * Dispatches to type-specific methods for typed array access.
-     */
-    private TypedColumnData prefetchNested(int maxRecords) {
+    // ==================== Nested Batch Computation ====================
+
+    private TypedColumnData computeNestedBatch(int maxRecords) {
         int maxDefLevel = column.maxDefinitionLevel();
 
         if (!ensurePageLoaded()) {
-            // No data available - return empty typed column based on physical type
             return switch (column.type()) {
                 case INT32 -> new TypedColumnData.IntColumn(column, new int[0], new int[0], new int[0], new int[0], maxDefLevel, 0);
                 case INT64 -> new TypedColumnData.LongColumn(column, new long[0], new int[0], new int[0], new int[0], maxDefLevel, 0);
@@ -297,16 +386,16 @@ public class ColumnValueIterator {
         }
 
         return switch (currentPage) {
-            case Page.IntPage p -> prefetchNestedInt(maxRecords, maxDefLevel);
-            case Page.LongPage p -> prefetchNestedLong(maxRecords, maxDefLevel);
-            case Page.FloatPage p -> prefetchNestedFloat(maxRecords, maxDefLevel);
-            case Page.DoublePage p -> prefetchNestedDouble(maxRecords, maxDefLevel);
-            case Page.BooleanPage p -> prefetchNestedBoolean(maxRecords, maxDefLevel);
-            case Page.ByteArrayPage p -> prefetchNestedByteArray(maxRecords, maxDefLevel);
+            case Page.IntPage p -> computeNestedInt(maxRecords, maxDefLevel);
+            case Page.LongPage p -> computeNestedLong(maxRecords, maxDefLevel);
+            case Page.FloatPage p -> computeNestedFloat(maxRecords, maxDefLevel);
+            case Page.DoublePage p -> computeNestedDouble(maxRecords, maxDefLevel);
+            case Page.BooleanPage p -> computeNestedBoolean(maxRecords, maxDefLevel);
+            case Page.ByteArrayPage p -> computeNestedByteArray(maxRecords, maxDefLevel);
         };
     }
 
-    private TypedColumnData prefetchNestedInt(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeNestedInt(int maxRecords, int maxDefLevel) {
         int estimatedValues = maxRecords * 2;
         int[] values = new int[estimatedValues];
         int[] defLevels = new int[estimatedValues];
@@ -349,7 +438,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.IntColumn(column, values, defLevels, repLevels, recordOffsets, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchNestedLong(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeNestedLong(int maxRecords, int maxDefLevel) {
         int estimatedValues = maxRecords * 2;
         long[] values = new long[estimatedValues];
         int[] defLevels = new int[estimatedValues];
@@ -392,7 +481,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.LongColumn(column, values, defLevels, repLevels, recordOffsets, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchNestedFloat(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeNestedFloat(int maxRecords, int maxDefLevel) {
         int estimatedValues = maxRecords * 2;
         float[] values = new float[estimatedValues];
         int[] defLevels = new int[estimatedValues];
@@ -435,7 +524,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.FloatColumn(column, values, defLevels, repLevels, recordOffsets, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchNestedDouble(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeNestedDouble(int maxRecords, int maxDefLevel) {
         int estimatedValues = maxRecords * 2;
         double[] values = new double[estimatedValues];
         int[] defLevels = new int[estimatedValues];
@@ -478,7 +567,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.DoubleColumn(column, values, defLevels, repLevels, recordOffsets, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchNestedBoolean(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeNestedBoolean(int maxRecords, int maxDefLevel) {
         int estimatedValues = maxRecords * 2;
         boolean[] values = new boolean[estimatedValues];
         int[] defLevels = new int[estimatedValues];
@@ -521,7 +610,7 @@ public class ColumnValueIterator {
         return new TypedColumnData.BooleanColumn(column, values, defLevels, repLevels, recordOffsets, maxDefLevel, recordCount);
     }
 
-    private TypedColumnData prefetchNestedByteArray(int maxRecords, int maxDefLevel) {
+    private TypedColumnData computeNestedByteArray(int maxRecords, int maxDefLevel) {
         int estimatedValues = maxRecords * 2;
         byte[][] values = new byte[estimatedValues][];
         int[] defLevels = new int[estimatedValues];
@@ -571,18 +660,13 @@ public class ColumnValueIterator {
             return true;
         }
 
-        if (valuesRead >= totalValues) {
+        if (!pageCursor.hasNext()) {
             return false;
         }
 
-        try {
-            currentPage = pageReader.readPage();
-            position = 0;
-            return currentPage != null;
-        }
-        catch (IOException e) {
-            throw new UncheckedIOException("Failed to read page", e);
-        }
+        currentPage = pageCursor.nextPage();
+        position = 0;
+        return currentPage != null;
     }
 
     private boolean nextRecord() {
@@ -621,11 +705,10 @@ public class ColumnValueIterator {
 
     private void advance() {
         position++;
-        valuesRead++;
 
         if (currentPage != null && position >= currentPage.size()) {
-            try {
-                currentPage = pageReader.readPage();
+            if (pageCursor.hasNext()) {
+                currentPage = pageCursor.nextPage();
                 position = 0;
                 if (recordActive && currentPage != null) {
                     int[] repLevels = currentPage.repetitionLevels();
@@ -637,9 +720,13 @@ public class ColumnValueIterator {
                     }
                 }
             }
-            catch (IOException e) {
-                throw new UncheckedIOException("Failed to read next page", e);
-            }
         }
+    }
+
+    /**
+     * Check if there are more records available.
+     */
+    public boolean hasMore() {
+        return !exhausted && ensurePageLoaded();
     }
 }

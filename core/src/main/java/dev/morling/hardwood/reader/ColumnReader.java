@@ -7,14 +7,16 @@
  */
 package dev.morling.hardwood.reader;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 
 import dev.morling.hardwood.internal.conversion.LogicalTypeConverter;
-import dev.morling.hardwood.internal.reader.ColumnValueIterator;
 import dev.morling.hardwood.internal.reader.Page;
 import dev.morling.hardwood.internal.reader.PageReader;
 import dev.morling.hardwood.metadata.ColumnChunk;
@@ -23,8 +25,9 @@ import dev.morling.hardwood.schema.ColumnSchema;
 
 /**
  * Reader for a column chunk.
+ * Each ColumnReader opens its own dedicated FileChannel for the column chunk.
  */
-public class ColumnReader {
+public class ColumnReader implements Closeable {
 
     private final ColumnSchema column;
     private final ColumnMetaData columnMetaData;
@@ -32,6 +35,7 @@ public class ColumnReader {
     private final int maxDefinitionLevel;
     private final int maxRepetitionLevel;
     private final long totalValues;
+    private final FileChannel channel;
 
     // State for incremental reading
     private Page currentPage;
@@ -41,12 +45,15 @@ public class ColumnReader {
     // Lookahead buffer (single value)
     private ValueWithLevels lookahead;
 
-    public ColumnReader(FileChannel channel, ColumnSchema column, ColumnChunk columnChunk) throws IOException {
+    public ColumnReader(Path path, ColumnSchema column, ColumnChunk columnChunk) throws IOException {
         this.column = column;
         this.columnMetaData = columnChunk.metaData();
         this.maxDefinitionLevel = column.maxDefinitionLevel();
         this.maxRepetitionLevel = column.maxRepetitionLevel();
         this.totalValues = columnMetaData.numValues();
+
+        // Open a dedicated FileChannel for this column chunk
+        this.channel = FileChannel.open(path, StandardOpenOption.READ);
 
         // Determine the start of the column chunk (dictionary page or data page)
         Long dictOffset = columnMetaData.dictionaryPageOffset();
@@ -59,6 +66,11 @@ public class ColumnReader {
         MappedByteBuffer mappedChunk = channel.map(FileChannel.MapMode.READ_ONLY, chunkStartOffset, chunkSize);
 
         this.pageReader = new PageReader(mappedChunk, columnMetaData, column);
+    }
+
+    @Override
+    public void close() throws IOException {
+        channel.close();
     }
 
     /**
@@ -273,22 +285,5 @@ public class ColumnReader {
 
     public ColumnMetaData getColumnMetaData() {
         return columnMetaData;
-    }
-
-    /**
-     * Create an iterator for this column.
-     *
-     * <p>The iterator provides record-by-record iteration with typed accessors
-     * to avoid boxing overhead. It automatically fetches pages from the underlying
-     * PageReader as needed.</p>
-     *
-     * <p><strong>Note:</strong> After calling this method, do not use the batch-based
-     * methods ({@link #readBatch}, {@link #readTypedBatch}) as they share state with
-     * the iterator.</p>
-     *
-     * @return a new ColumnValueIterator for this column
-     */
-    ColumnValueIterator createIterator() {
-        return new ColumnValueIterator(pageReader, column, totalValues);
     }
 }

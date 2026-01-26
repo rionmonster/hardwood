@@ -33,9 +33,11 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
+import dev.morling.hardwood.metadata.PhysicalType;
 import dev.morling.hardwood.reader.ParquetFileReader;
 import dev.morling.hardwood.reader.RowReader;
 import dev.morling.hardwood.row.PqRow;
+import dev.morling.hardwood.schema.SchemaNode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.withinPercentage;
@@ -43,15 +45,17 @@ import static org.assertj.core.api.Assertions.withinPercentage;
 /**
  * Performance comparison test between Hardwood, and parquet-java.
  *
- * <p>Downloads NYC Yellow Taxi Trip Records for 2020-2025 and compares reading
- * performance while verifying correctness by comparing calculated sums.</p>
+ * <p>
+ * Downloads NYC Yellow Taxi Trip Records and compares reading performance while
+ * verifying correctness by comparing calculated sums.
+ * </p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SimplePerformanceTest {
 
     private static final String BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data/";
     private static final Path DATA_DIR = Path.of("target/tlc-trip-record-data");
-    private static final YearMonth DEFAULT_START = YearMonth.of(2020, 1);
+    private static final YearMonth DEFAULT_START = YearMonth.of(2016, 1);
     private static final YearMonth DEFAULT_END = YearMonth.of(2025, 11);
     private static final String CONTENDERS_PROPERTY = "perf.contenders";
     private static final String START_PROPERTY = "perf.start";
@@ -145,10 +149,12 @@ class SimplePerformanceTest {
                 .map(Contender::displayName)
                 .collect(Collectors.joining(", ")));
 
-        // Warmup run (not timed) - use first enabled contender
+        // Warmup run (not timed) - use first enabled contender, limited to 3 years of data
         System.out.println("\nWarmup run...");
         Contender warmupContender = enabledContenders.iterator().next();
-        getRunner(warmupContender).apply(files);
+        int warmupFileLimit = Math.min(files.size(), 12); // 3 years max
+        List<Path> warmupFiles = files.subList(0, warmupFileLimit);
+        getRunner(warmupContender).apply(warmupFiles);
 
         // Timed runs
         System.out.println("\nTimed runs:");
@@ -224,11 +230,21 @@ class SimplePerformanceTest {
         for (Path file : files) {
             try (ParquetFileReader reader = ParquetFileReader.open(file);
                     RowReader rowReader = reader.createRowReader()) {
+
+                // Check column type once per file
+                SchemaNode pcNode = reader.getFileSchema().getField("passenger_count");
+                boolean pcIsLong = pcNode instanceof SchemaNode.PrimitiveNode pn
+                        && pn.type() == PhysicalType.INT64;
+
                 for (PqRow row : rowReader) {
                     rowCount++;
-                    Object pc = row.getValue("passenger_count");
-                    if (pc != null) {
-                        passengerCount += ((Number) pc).longValue();
+                    if (!row.isNull("passenger_count")) {
+                        if (pcIsLong) {
+                            passengerCount += row.getLong("passenger_count");
+                        }
+                        else {
+                            passengerCount += (long) row.getDouble("passenger_count");
+                        }
                     }
 
                     if (!row.isNull("trip_distance")) {

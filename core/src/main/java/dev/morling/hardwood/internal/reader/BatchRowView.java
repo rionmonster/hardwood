@@ -12,7 +12,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.util.List;
 import java.util.UUID;
 
 import dev.morling.hardwood.internal.conversion.LogicalTypeConverter;
@@ -28,35 +27,30 @@ import dev.morling.hardwood.schema.ColumnSchema;
 import dev.morling.hardwood.schema.FileSchema;
 
 /**
- * Implementation of PqRow that reads directly from typed prefetched column data at a given row index.
+ * Immutable view into batch column data at a specific row index.
  * <p>
- * This implementation is optimized for flat schemas (no nested/repeated fields) where
- * row N maps directly to index N in each column's prefetched data. For flat schemas, this avoids
- * the overhead of record assembly via {@link RecordAssembler} and eliminates boxing for
- * primitive types by reading directly from typed primitive arrays.
- * </p>
- * <p>
- * Nested field accessors ({@link #getRow}, {@link #getList}, {@link #getMap}) throw
- * {@link UnsupportedOperationException} as this implementation is only used for flat schemas.
+ * This class provides PqRow access to data stored in {@link TypedColumnData} arrays.
+ * Each instance captures a snapshot of the column data references and row index,
+ * remaining valid even after the iterator loads subsequent batches.
  * </p>
  */
-public class ColumnarPqRowImpl implements PqRow {
+public class BatchRowView implements PqRow {
 
-    private final List<TypedColumnData> columns;
-    private final int rowIndex;
+    private final TypedColumnData[] columnData;
     private final FileSchema schema;
+    private final int rowIndex;
 
     /**
-     * Create a columnar PqRow backed by typed prefetched column data.
+     * Create a BatchRowView for a specific row in the batch.
      *
-     * @param columns  the typed prefetched column data (one per column)
-     * @param rowIndex the row index within the current batch
-     * @param schema   the file schema for column lookup
+     * @param columnData the column data for this batch (should be a defensive copy if batch may change)
+     * @param schema     the file schema
+     * @param rowIndex   the row index within the batch (immutable)
      */
-    public ColumnarPqRowImpl(List<TypedColumnData> columns, int rowIndex, FileSchema schema) {
-        this.columns = columns;
-        this.rowIndex = rowIndex;
+    public BatchRowView(TypedColumnData[] columnData, FileSchema schema, int rowIndex) {
+        this.columnData = columnData;
         this.schema = schema;
+        this.rowIndex = rowIndex;
     }
 
     // ==================== Primitive Types ====================
@@ -65,7 +59,8 @@ public class ColumnarPqRowImpl implements PqRow {
     public int getInt(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.INT32);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             throw new NullPointerException("Field '" + name + "' is null");
         }
@@ -76,7 +71,8 @@ public class ColumnarPqRowImpl implements PqRow {
     public long getLong(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.INT64);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             throw new NullPointerException("Field '" + name + "' is null");
         }
@@ -87,7 +83,8 @@ public class ColumnarPqRowImpl implements PqRow {
     public float getFloat(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.FLOAT);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             throw new NullPointerException("Field '" + name + "' is null");
         }
@@ -98,7 +95,8 @@ public class ColumnarPqRowImpl implements PqRow {
     public double getDouble(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.DOUBLE);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             throw new NullPointerException("Field '" + name + "' is null");
         }
@@ -109,7 +107,8 @@ public class ColumnarPqRowImpl implements PqRow {
     public boolean getBoolean(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.BOOLEAN);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             throw new NullPointerException("Field '" + name + "' is null");
         }
@@ -121,27 +120,30 @@ public class ColumnarPqRowImpl implements PqRow {
     @Override
     public String getString(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             return null;
         }
-        return new String(getByteArrayValue(data), StandardCharsets.UTF_8);
+        return new String(((TypedColumnData.ByteArrayColumn) data).get(rowIndex), StandardCharsets.UTF_8);
     }
 
     @Override
     public byte[] getBinary(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             return null;
         }
-        return getByteArrayValue(data);
+        return ((TypedColumnData.ByteArrayColumn) data).get(rowIndex);
     }
 
     @Override
     public LocalDate getDate(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             return null;
         }
@@ -152,7 +154,8 @@ public class ColumnarPqRowImpl implements PqRow {
     @Override
     public LocalTime getTime(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             return null;
         }
@@ -169,7 +172,8 @@ public class ColumnarPqRowImpl implements PqRow {
     @Override
     public Instant getTimestamp(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             return null;
         }
@@ -180,14 +184,15 @@ public class ColumnarPqRowImpl implements PqRow {
     @Override
     public BigDecimal getDecimal(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             return null;
         }
         Object rawValue = switch (col.type()) {
             case INT32 -> ((TypedColumnData.IntColumn) data).get(rowIndex);
             case INT64 -> ((TypedColumnData.LongColumn) data).get(rowIndex);
-            case BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY -> getByteArrayValue(data);
+            case BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY -> ((TypedColumnData.ByteArrayColumn) data).get(rowIndex);
             default -> throw new IllegalArgumentException("Unexpected physical type for DECIMAL: " + col.type());
         };
         return LogicalTypeConverter.convertToDecimal(rawValue, col.type(), (LogicalType.DecimalType) col.logicalType());
@@ -196,11 +201,12 @@ public class ColumnarPqRowImpl implements PqRow {
     @Override
     public UUID getUuid(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             return null;
         }
-        return LogicalTypeConverter.convertToUuid(getByteArrayValue(data), col.type());
+        return LogicalTypeConverter.convertToUuid(((TypedColumnData.ByteArrayColumn) data).get(rowIndex), col.type());
     }
 
     // ==================== Nested Types (not supported for flat schemas) ====================
@@ -208,37 +214,37 @@ public class ColumnarPqRowImpl implements PqRow {
     @Override
     public PqRow getRow(String name) {
         throw new UnsupportedOperationException(
-                "Nested struct access not supported in columnar mode. Schema is expected to be flat.");
+                "Nested struct access not supported in batch mode. Schema is expected to be flat.");
     }
 
     @Override
     public PqIntList getListOfInts(String name) {
         throw new UnsupportedOperationException(
-                "List access not supported in columnar mode. Schema is expected to be flat.");
+                "List access not supported in batch mode. Schema is expected to be flat.");
     }
 
     @Override
     public PqLongList getListOfLongs(String name) {
         throw new UnsupportedOperationException(
-                "List access not supported in columnar mode. Schema is expected to be flat.");
+                "List access not supported in batch mode. Schema is expected to be flat.");
     }
 
     @Override
     public PqDoubleList getListOfDoubles(String name) {
         throw new UnsupportedOperationException(
-                "List access not supported in columnar mode. Schema is expected to be flat.");
+                "List access not supported in batch mode. Schema is expected to be flat.");
     }
 
     @Override
     public PqList getList(String name) {
         throw new UnsupportedOperationException(
-                "List access not supported in columnar mode. Schema is expected to be flat.");
+                "List access not supported in batch mode. Schema is expected to be flat.");
     }
 
     @Override
     public PqMap getMap(String name) {
         throw new UnsupportedOperationException(
-                "Map access not supported in columnar mode. Schema is expected to be flat.");
+                "Map access not supported in batch mode. Schema is expected to be flat.");
     }
 
     // ==================== Generic Fallback ====================
@@ -246,11 +252,12 @@ public class ColumnarPqRowImpl implements PqRow {
     @Override
     public Object getValue(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
+        int idx = col.columnIndex();
+        TypedColumnData data = columnData[idx];
         if (data.isNull(rowIndex)) {
             return null;
         }
-        return getBoxedValue(data);
+        return data.getValue(rowIndex);
     }
 
     // ==================== Metadata ====================
@@ -258,8 +265,8 @@ public class ColumnarPqRowImpl implements PqRow {
     @Override
     public boolean isNull(String name) {
         ColumnSchema col = schema.getColumn(name);
-        TypedColumnData data = columns.get(col.columnIndex());
-        return data.isNull(rowIndex);
+        int idx = col.columnIndex();
+        return columnData[idx].isNull(rowIndex);
     }
 
     @Override
@@ -274,31 +281,6 @@ public class ColumnarPqRowImpl implements PqRow {
 
     // ==================== Internal Helpers ====================
 
-    /**
-     * Get a byte array value from typed data.
-     */
-    private byte[] getByteArrayValue(TypedColumnData data) {
-        return ((TypedColumnData.ByteArrayColumn) data).get(rowIndex);
-    }
-
-    /**
-     * Get a value from typed data, boxing primitives if needed.
-     * Used for logical type conversions that require the raw physical value.
-     */
-    private Object getBoxedValue(TypedColumnData data) {
-        return switch (data) {
-            case TypedColumnData.IntColumn intCol -> intCol.get(rowIndex);
-            case TypedColumnData.LongColumn longCol -> longCol.get(rowIndex);
-            case TypedColumnData.FloatColumn floatCol -> floatCol.get(rowIndex);
-            case TypedColumnData.DoubleColumn doubleCol -> doubleCol.get(rowIndex);
-            case TypedColumnData.BooleanColumn boolCol -> boolCol.get(rowIndex);
-            case TypedColumnData.ByteArrayColumn byteCol -> byteCol.get(rowIndex);
-        };
-    }
-
-    /**
-     * Validate that the column has the expected physical type.
-     */
     private void validatePhysicalType(ColumnSchema col, PhysicalType... expectedTypes) {
         for (PhysicalType expected : expectedTypes) {
             if (col.type() == expected) {
