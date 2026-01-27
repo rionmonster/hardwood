@@ -7,6 +7,12 @@
  */
 package dev.morling.hardwood.internal.reader;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+
+import dev.morling.hardwood.internal.encoding.PlainDecoder;
+import dev.morling.hardwood.metadata.PhysicalType;
+
 /**
  * Typed dictionary for dictionary-encoded Parquet columns.
  * Each variant holds a primitive array of dictionary values.
@@ -14,6 +20,50 @@ package dev.morling.hardwood.internal.reader;
 public sealed interface Dictionary {
 
     int size();
+
+    /**
+     * Parse dictionary values from decompressed data.
+     *
+     * @param data decompressed dictionary page data
+     * @param numValues number of dictionary entries
+     * @param type physical type of the column
+     * @param typeLength type length for fixed-length types (may be null for variable-length types)
+     * @return typed dictionary
+     */
+    static Dictionary parse(byte[] data, int numValues, PhysicalType type, Integer typeLength) throws IOException {
+        ByteArrayInputStream dataStream = new ByteArrayInputStream(data);
+        PlainDecoder decoder = new PlainDecoder(dataStream, type, typeLength);
+
+        return switch (type) {
+            case INT32 -> {
+                int[] values = new int[numValues];
+                decoder.readInts(values, null, 0);
+                yield new IntDictionary(values);
+            }
+            case INT64 -> {
+                long[] values = new long[numValues];
+                decoder.readLongs(values, null, 0);
+                yield new LongDictionary(values);
+            }
+            case FLOAT -> {
+                float[] values = new float[numValues];
+                decoder.readFloats(values, null, 0);
+                yield new FloatDictionary(values);
+            }
+            case DOUBLE -> {
+                double[] values = new double[numValues];
+                decoder.readDoubles(values, null, 0);
+                yield new DoubleDictionary(values);
+            }
+            case BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY, INT96 -> {
+                byte[][] values = new byte[numValues][];
+                decoder.readByteArrays(values, null, 0);
+                yield new ByteArrayDictionary(values);
+            }
+            case BOOLEAN -> throw new UnsupportedOperationException(
+                    "Dictionary encoding not supported for BOOLEAN type");
+        };
+    }
 
     record IntDictionary(int[] values) implements Dictionary {
         @Override

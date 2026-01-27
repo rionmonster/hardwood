@@ -9,29 +9,35 @@ package dev.morling.hardwood.reader;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
 
 import dev.morling.hardwood.internal.conversion.LogicalTypeConverter;
 import dev.morling.hardwood.internal.reader.Page;
-import dev.morling.hardwood.internal.reader.PageReader;
+import dev.morling.hardwood.internal.reader.PageCursor;
+import dev.morling.hardwood.internal.reader.PageInfo;
+import dev.morling.hardwood.internal.reader.PageScanner;
 import dev.morling.hardwood.metadata.ColumnChunk;
 import dev.morling.hardwood.metadata.ColumnMetaData;
 import dev.morling.hardwood.schema.ColumnSchema;
 
 /**
  * Reader for a column chunk.
- * Each ColumnReader opens its own dedicated FileChannel for the column chunk.
+ * <p>
+ * Uses the same infrastructure as RowReader: PageScanner for page scanning
+ * and PageCursor for async prefetching.
+ * </p>
  */
 public class ColumnReader implements Closeable {
 
     private final ColumnSchema column;
     private final ColumnMetaData columnMetaData;
-    private final PageReader pageReader;
+    private final PageCursor pageCursor;
     private final int maxDefinitionLevel;
     private final int maxRepetitionLevel;
     private final long totalValues;
@@ -46,6 +52,10 @@ public class ColumnReader implements Closeable {
     private ValueWithLevels lookahead;
 
     public ColumnReader(Path path, ColumnSchema column, ColumnChunk columnChunk) throws IOException {
+        this(path, column, columnChunk, ForkJoinPool.commonPool());
+    }
+
+    public ColumnReader(Path path, ColumnSchema column, ColumnChunk columnChunk, Executor executor) throws IOException {
         this.column = column;
         this.columnMetaData = columnChunk.metaData();
         this.maxDefinitionLevel = column.maxDefinitionLevel();
@@ -55,17 +65,12 @@ public class ColumnReader implements Closeable {
         // Open a dedicated FileChannel for this column chunk
         this.channel = FileChannel.open(path, StandardOpenOption.READ);
 
-        // Determine the start of the column chunk (dictionary page or data page)
-        Long dictOffset = columnMetaData.dictionaryPageOffset();
-        long chunkStartOffset = (dictOffset != null && dictOffset > 0)
-                ? dictOffset
-                : columnMetaData.dataPageOffset();
+        // Scan pages using PageScanner
+        PageScanner scanner = new PageScanner(channel, column, columnChunk);
+        List<PageInfo> pageInfos = scanner.scanPages();
 
-        // Memory-map the column chunk region
-        long chunkSize = columnMetaData.totalCompressedSize();
-        MappedByteBuffer mappedChunk = channel.map(FileChannel.MapMode.READ_ONLY, chunkStartOffset, chunkSize);
-
-        this.pageReader = new PageReader(mappedChunk, columnMetaData, column);
+        // Create PageCursor for async prefetching
+        this.pageCursor = new PageCursor(pageInfos, executor);
     }
 
     @Override
@@ -271,8 +276,10 @@ public class ColumnReader implements Closeable {
      */
     private void ensurePageLoaded() throws IOException {
         if (currentPage == null || currentPagePosition >= currentPage.size()) {
-            currentPage = pageReader.readPage();
-            currentPagePosition = 0;
+            if (pageCursor.hasNext()) {
+                currentPage = pageCursor.nextPage();
+                currentPagePosition = 0;
+            }
         }
     }
 

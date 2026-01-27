@@ -12,7 +12,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
 
 import dev.morling.hardwood.internal.compression.Decompressor;
 import dev.morling.hardwood.internal.compression.DecompressorFactory;
@@ -27,47 +26,39 @@ import dev.morling.hardwood.internal.thrift.ThriftCompactReader;
 import dev.morling.hardwood.metadata.ColumnMetaData;
 import dev.morling.hardwood.metadata.DataPageHeader;
 import dev.morling.hardwood.metadata.DataPageHeaderV2;
-import dev.morling.hardwood.metadata.DictionaryPageHeader;
 import dev.morling.hardwood.metadata.Encoding;
 import dev.morling.hardwood.metadata.PageHeader;
 import dev.morling.hardwood.metadata.PhysicalType;
 import dev.morling.hardwood.schema.ColumnSchema;
 
 /**
- * Reader for individual pages within a column chunk.
- * Uses a memory-mapped buffer (one per column chunk) for efficient, thread-safe access.
+ * Decoder for individual Parquet data pages.
+ * <p>
+ * This class provides stateless page decoding via {@link #decodeSinglePage}.
+ * Page scanning and dictionary parsing are handled by {@link PageScanner}.
+ * </p>
  */
 public class PageReader {
 
     private final ColumnMetaData columnMetaData;
     private final ColumnSchema column;
-    private final MappedByteBuffer mappedBuffer;  // Mapped to this column chunk only
-    private int currentPosition = 0;              // Position within the column chunk buffer
-    private long valuesRead = 0;
-    private Dictionary dictionary = null;
-
-    public PageReader(MappedByteBuffer mappedBuffer, ColumnMetaData columnMetaData, ColumnSchema column) {
-        this.mappedBuffer = mappedBuffer;
-        this.columnMetaData = columnMetaData;
-        this.column = column;
-    }
+    private final Dictionary dictionary;
 
     /**
      * Constructor for single-page decoding with a pre-parsed dictionary.
-     * Used by decodeSinglePage for parallel page processing.
-     * The buffer is not used for single-page decoding (can be null).
      */
     private PageReader(ColumnMetaData columnMetaData, ColumnSchema column, Dictionary dictionary) {
-        this.mappedBuffer = null;
         this.columnMetaData = columnMetaData;
         this.column = column;
         this.dictionary = dictionary;
     }
 
     /**
-     * Decode a single data page from the mapped buffer.
-     * The buffer should be positioned at the start of the page (including header).
-     * Used by PageDecoderWorker for parallel page processing.
+     * Decode a single data page from a buffer.
+     * <p>
+     * The buffer should contain the complete page including header.
+     * This method is stateless and thread-safe.
+     * </p>
      *
      * @param pageBuffer buffer containing just this page (header + data)
      * @param columnMetaData metadata for the column
@@ -101,59 +92,6 @@ public class PageReader {
                 yield reader.parseDataPageV2(pageHeader.dataPageHeaderV2(), pageData, pageHeader.uncompressedPageSize());
             }
             default -> throw new IOException("Unexpected page type for single-page decode: " + pageHeader.type());
-        };
-    }
-
-    /**
-     * Read the next page. Returns null if no more pages.
-     * Reads directly from memory-mapped buffer - thread-safe with no system calls.
-     */
-    public Page readPage() throws IOException {
-        if (valuesRead >= columnMetaData.numValues()) {
-            return null;
-        }
-
-        // Create a slice of the mapped buffer starting at current position for header parsing
-        ByteBufferInputStream headerStream = new ByteBufferInputStream(mappedBuffer, currentPosition);
-        ThriftCompactReader headerReader = new ThriftCompactReader(headerStream);
-        PageHeader pageHeader = PageHeaderReader.read(headerReader);
-        int headerSize = headerStream.getBytesRead();
-
-        // Read page data directly from the mapped buffer using bulk copy
-        int compressedSize = pageHeader.compressedPageSize();
-        int dataStart = currentPosition + headerSize;
-        byte[] pageData = new byte[compressedSize];
-        mappedBuffer.slice(dataStart, compressedSize).get(pageData);
-
-        // Update position for next page
-        currentPosition += headerSize + compressedSize;
-
-        // Handle different page types
-        // Note: DATA_PAGE_V2 has different compression semantics - levels are uncompressed
-        return switch (pageHeader.type()) {
-            case DICTIONARY_PAGE -> {
-                // Decompress entire page data for dictionary pages
-                Decompressor decompressor = DecompressorFactory.getDecompressor(columnMetaData.codec());
-                byte[] uncompressedData = decompressor.decompress(pageData, pageHeader.uncompressedPageSize());
-                // Read and store dictionary values
-                parseDictionaryPage(pageHeader.dictionaryPageHeader(), uncompressedData);
-                yield readPage(); // Read next page (the data page)
-            }
-            case DATA_PAGE -> {
-                // Decompress entire page data for V1 data pages
-                Decompressor decompressor = DecompressorFactory.getDecompressor(columnMetaData.codec());
-                byte[] uncompressedData = decompressor.decompress(pageData, pageHeader.uncompressedPageSize());
-                DataPageHeader dataHeader = pageHeader.dataPageHeader();
-                valuesRead += dataHeader.numValues();
-                yield parseDataPage(dataHeader, uncompressedData);
-            }
-            case DATA_PAGE_V2 -> {
-                // For V2, levels are stored uncompressed; only values may be compressed
-                DataPageHeaderV2 dataHeaderV2 = pageHeader.dataPageHeaderV2();
-                valuesRead += dataHeaderV2.numValues();
-                yield parseDataPageV2(dataHeaderV2, pageData, pageHeader.uncompressedPageSize());
-            }
-            default -> throw new IOException("Unexpected page type: " + pageHeader.type());
         };
     }
 
@@ -192,51 +130,6 @@ public class PageReader {
         byte[] bytes = new byte[4];
         stream.read(bytes);
         return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
-    }
-
-    private void parseDictionaryPage(DictionaryPageHeader header, byte[] data)
-            throws IOException {
-        ByteArrayInputStream dataStream = new ByteArrayInputStream(data);
-
-        // Dictionary values are encoded with PLAIN or PLAIN_DICTIONARY encoding
-        if (header.encoding() != Encoding.PLAIN && header.encoding() != Encoding.PLAIN_DICTIONARY) {
-            throw new UnsupportedOperationException(
-                    "Dictionary encoding not yet supported: " + header.encoding());
-        }
-
-        // Read dictionary values directly into typed arrays
-        int numValues = header.numValues();
-        PlainDecoder decoder = new PlainDecoder(dataStream, column.type(), column.typeLength());
-
-        dictionary = switch (column.type()) {
-            case INT32 -> {
-                int[] values = new int[numValues];
-                decoder.readInts(values, null, 0);
-                yield new Dictionary.IntDictionary(values);
-            }
-            case INT64 -> {
-                long[] values = new long[numValues];
-                decoder.readLongs(values, null, 0);
-                yield new Dictionary.LongDictionary(values);
-            }
-            case FLOAT -> {
-                float[] values = new float[numValues];
-                decoder.readFloats(values, null, 0);
-                yield new Dictionary.FloatDictionary(values);
-            }
-            case DOUBLE -> {
-                double[] values = new double[numValues];
-                decoder.readDoubles(values, null, 0);
-                yield new Dictionary.DoubleDictionary(values);
-            }
-            case BYTE_ARRAY, FIXED_LEN_BYTE_ARRAY, INT96 -> {
-                byte[][] values = new byte[numValues][];
-                decoder.readByteArrays(values, null, 0);
-                yield new Dictionary.ByteArrayDictionary(values);
-            }
-            case BOOLEAN -> throw new UnsupportedOperationException(
-                    "Dictionary encoding not supported for BOOLEAN type");
-        };
     }
 
     private int getBitWidth(int maxValue) {

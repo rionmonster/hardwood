@@ -10,6 +10,7 @@ package dev.morling.hardwood.reader;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CompletableFuture;
@@ -20,7 +21,9 @@ import dev.morling.hardwood.internal.reader.PageCursor;
 import dev.morling.hardwood.internal.reader.PageInfo;
 import dev.morling.hardwood.internal.reader.PageScanner;
 import dev.morling.hardwood.internal.reader.TypedColumnData;
+import dev.morling.hardwood.metadata.ColumnChunk;
 import dev.morling.hardwood.metadata.RowGroup;
+import dev.morling.hardwood.schema.ColumnSchema;
 import dev.morling.hardwood.schema.FileSchema;
 
 /**
@@ -37,7 +40,6 @@ abstract class AbstractRowReader implements RowReader {
     private final ExecutorService executor;
     private final String fileName;
 
-    private PageScanner scanner;
     private ColumnValueIterator[] iterators;
 
     protected int rowIndex = -1;  // -1 means next() not yet called
@@ -65,12 +67,34 @@ abstract class AbstractRowReader implements RowReader {
             LOG.log(System.Logger.Level.DEBUG, "Starting to parse file ''{0}'' with {1} row groups, {2} columns",
                     fileName, rowGroups.size(), schema.getColumnCount());
 
-            scanner = new PageScanner(channel, schema, rowGroups);
-            List<List<PageInfo>> pageInfosByColumn = scanner.scanPages();
-
             int columnCount = schema.getColumnCount();
-            iterators = new ColumnValueIterator[columnCount];
 
+            // Collect page infos for each column across all row groups
+            List<List<PageInfo>> pageInfosByColumn = new ArrayList<>(columnCount);
+            for (int i = 0; i < columnCount; i++) {
+                pageInfosByColumn.add(new ArrayList<>());
+            }
+
+            LOG.log(System.Logger.Level.DEBUG, "Scanning pages for {0} columns across {1} row groups",
+                    columnCount, rowGroups.size());
+
+            for (RowGroup rowGroup : rowGroups) {
+                for (int colIndex = 0; colIndex < columnCount; colIndex++) {
+                    ColumnSchema columnSchema = schema.getColumn(colIndex);
+                    ColumnChunk columnChunk = rowGroup.columns().get(colIndex);
+
+                    PageScanner scanner = new PageScanner(channel, columnSchema, columnChunk);
+                    List<PageInfo> pageInfos = scanner.scanPages();
+                    pageInfosByColumn.get(colIndex).addAll(pageInfos);
+                }
+            }
+
+            int totalPages = pageInfosByColumn.stream().mapToInt(List::size).sum();
+            LOG.log(System.Logger.Level.DEBUG, "Page scanning complete: {0} total pages across {1} columns",
+                    totalPages, columnCount);
+
+            // Create iterators for each column
+            iterators = new ColumnValueIterator[columnCount];
             for (int i = 0; i < columnCount; i++) {
                 PageCursor pageCursor = new PageCursor(pageInfosByColumn.get(i), executor);
                 iterators[i] = new ColumnValueIterator(pageCursor, schema.getColumn(i), executor);
