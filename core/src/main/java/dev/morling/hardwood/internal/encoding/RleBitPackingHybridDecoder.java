@@ -9,6 +9,8 @@ package dev.morling.hardwood.internal.encoding;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 
 /**
@@ -18,6 +20,7 @@ import java.util.Arrays;
 public class RleBitPackingHybridDecoder {
 
     private final byte[] data;
+    private final ByteBuffer dataBuffer;
     private final int bitWidth;
     private final int bitMask;
     private int pos;
@@ -37,6 +40,7 @@ public class RleBitPackingHybridDecoder {
 
     public RleBitPackingHybridDecoder(byte[] data, int bitWidth) {
         this.data = data;
+        this.dataBuffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
         this.bitWidth = bitWidth;
         this.bitMask = (bitWidth == 0) ? 0 : (1 << bitWidth) - 1;
     }
@@ -249,7 +253,7 @@ public class RleBitPackingHybridDecoder {
     }
 
     /**
-     * Batch decode bit-packed values. For widths 1-8, processes 8 values at a time.
+     * Batch decode bit-packed values. Optimized paths for common bit widths.
      */
     private void decodeBitPacked(int[] output, int outPos, int count) {
         final int width = bitWidth;
@@ -263,9 +267,41 @@ public class RleBitPackingHybridDecoder {
             count--;
         }
 
-        // For widths <= 8: 8 values fit in width bytes (8 * width bits = width bytes)
-        // For widths > 8: process one value at a time
-        if (width <= 8) {
+        // Fast path for bit width 1 (common for definition levels)
+        if (width == 1) {
+            while (count >= 8 && pos < data.length) {
+                int b = data[pos++] & 0xFF;
+                output[outPos]     = b & 1;
+                output[outPos + 1] = (b >> 1) & 1;
+                output[outPos + 2] = (b >> 2) & 1;
+                output[outPos + 3] = (b >> 3) & 1;
+                output[outPos + 4] = (b >> 4) & 1;
+                output[outPos + 5] = (b >> 5) & 1;
+                output[outPos + 6] = (b >> 6) & 1;
+                output[outPos + 7] = (b >> 7) & 1;
+                outPos += 8;
+                count -= 8;
+            }
+        }
+        // For widths 2-8: read 8 bytes at once when possible, extract 8 values
+        else if (width <= 8) {
+            // Process 8 values at a time using bulk long reads when we have enough data
+            while (count >= 8 && pos + 8 <= data.length) {
+                long bits = dataBuffer.getLong(pos);
+                pos += width; // Only consume 'width' bytes for 8 values
+
+                output[outPos]     = (int) (bits & mask); bits >>>= width;
+                output[outPos + 1] = (int) (bits & mask); bits >>>= width;
+                output[outPos + 2] = (int) (bits & mask); bits >>>= width;
+                output[outPos + 3] = (int) (bits & mask); bits >>>= width;
+                output[outPos + 4] = (int) (bits & mask); bits >>>= width;
+                output[outPos + 5] = (int) (bits & mask); bits >>>= width;
+                output[outPos + 6] = (int) (bits & mask); bits >>>= width;
+                output[outPos + 7] = (int) (bits & mask);
+                outPos += 8;
+                count -= 8;
+            }
+            // Fallback when near end of buffer
             while (count >= 8 && pos + width <= data.length) {
                 long bits = 0;
                 for (int i = 0; i < width; i++) {

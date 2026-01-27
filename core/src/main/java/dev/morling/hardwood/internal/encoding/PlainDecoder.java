@@ -52,14 +52,29 @@ public class PlainDecoder implements ValueDecoder {
     @Override
     public void readLongs(long[] output, int[] definitionLevels, int maxDefLevel) throws IOException {
         if (definitionLevels == null) {
-            for (int i = 0; i < output.length; i++) {
-                output[i] = readInt64();
+            int numBytes = output.length * 8;
+            byte[] bytes = input.readNBytes(numBytes);
+            if (bytes.length != numBytes) {
+                throw new IOException("Unexpected EOF while reading INT64 values");
             }
+            ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asLongBuffer().get(output);
         }
         else {
+            int numDefined = 0;
             for (int i = 0; i < output.length; i++) {
                 if (definitionLevels[i] == maxDefLevel) {
-                    output[i] = readInt64();
+                    numDefined++;
+                }
+            }
+            int numBytes = numDefined * 8;
+            byte[] bytes = input.readNBytes(numBytes);
+            if (bytes.length != numBytes) {
+                throw new IOException("Unexpected EOF while reading INT64 values");
+            }
+            var longBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asLongBuffer();
+            for (int i = 0; i < output.length; i++) {
+                if (definitionLevels[i] == maxDefLevel) {
+                    output[i] = longBuffer.get();
                 }
             }
         }
@@ -71,14 +86,29 @@ public class PlainDecoder implements ValueDecoder {
     @Override
     public void readDoubles(double[] output, int[] definitionLevels, int maxDefLevel) throws IOException {
         if (definitionLevels == null) {
-            for (int i = 0; i < output.length; i++) {
-                output[i] = readDouble();
+            int numBytes = output.length * 8;
+            byte[] bytes = input.readNBytes(numBytes);
+            if (bytes.length != numBytes) {
+                throw new IOException("Unexpected EOF while reading DOUBLE values");
             }
+            ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asDoubleBuffer().get(output);
         }
         else {
+            int numDefined = 0;
             for (int i = 0; i < output.length; i++) {
                 if (definitionLevels[i] == maxDefLevel) {
-                    output[i] = readDouble();
+                    numDefined++;
+                }
+            }
+            int numBytes = numDefined * 8;
+            byte[] bytes = input.readNBytes(numBytes);
+            if (bytes.length != numBytes) {
+                throw new IOException("Unexpected EOF while reading DOUBLE values");
+            }
+            var doubleBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asDoubleBuffer();
+            for (int i = 0; i < output.length; i++) {
+                if (definitionLevels[i] == maxDefLevel) {
+                    output[i] = doubleBuffer.get();
                 }
             }
         }
@@ -90,14 +120,29 @@ public class PlainDecoder implements ValueDecoder {
     @Override
     public void readInts(int[] output, int[] definitionLevels, int maxDefLevel) throws IOException {
         if (definitionLevels == null) {
-            for (int i = 0; i < output.length; i++) {
-                output[i] = readInt32();
+            int numBytes = output.length * 4;
+            byte[] bytes = input.readNBytes(numBytes);
+            if (bytes.length != numBytes) {
+                throw new IOException("Unexpected EOF while reading INT32 values");
             }
+            ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(output);
         }
         else {
+            int numDefined = 0;
             for (int i = 0; i < output.length; i++) {
                 if (definitionLevels[i] == maxDefLevel) {
-                    output[i] = readInt32();
+                    numDefined++;
+                }
+            }
+            int numBytes = numDefined * 4;
+            byte[] bytes = input.readNBytes(numBytes);
+            if (bytes.length != numBytes) {
+                throw new IOException("Unexpected EOF while reading INT32 values");
+            }
+            var intBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
+            for (int i = 0; i < output.length; i++) {
+                if (definitionLevels[i] == maxDefLevel) {
+                    output[i] = intBuffer.get();
                 }
             }
         }
@@ -109,14 +154,29 @@ public class PlainDecoder implements ValueDecoder {
     @Override
     public void readFloats(float[] output, int[] definitionLevels, int maxDefLevel) throws IOException {
         if (definitionLevels == null) {
-            for (int i = 0; i < output.length; i++) {
-                output[i] = readFloat();
+            int numBytes = output.length * 4;
+            byte[] bytes = input.readNBytes(numBytes);
+            if (bytes.length != numBytes) {
+                throw new IOException("Unexpected EOF while reading FLOAT values");
             }
+            ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(output);
         }
         else {
+            int numDefined = 0;
             for (int i = 0; i < output.length; i++) {
                 if (definitionLevels[i] == maxDefLevel) {
-                    output[i] = readFloat();
+                    numDefined++;
+                }
+            }
+            int numBytes = numDefined * 4;
+            byte[] bytes = input.readNBytes(numBytes);
+            if (bytes.length != numBytes) {
+                throw new IOException("Unexpected EOF while reading FLOAT values");
+            }
+            var floatBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+            for (int i = 0; i < output.length; i++) {
+                if (definitionLevels[i] == maxDefLevel) {
+                    output[i] = floatBuffer.get();
                 }
             }
         }
@@ -194,24 +254,6 @@ public class PlainDecoder implements ValueDecoder {
         return value;
     }
 
-    private int readInt32() throws IOException {
-        byte[] bytes = new byte[4];
-        int read = input.read(bytes);
-        if (read != 4) {
-            throw new IOException("Unexpected EOF while reading INT32");
-        }
-        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
-    }
-
-    private long readInt64() throws IOException {
-        byte[] bytes = new byte[8];
-        int read = input.read(bytes);
-        if (read != 8) {
-            throw new IOException("Unexpected EOF while reading INT64");
-        }
-        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
-    }
-
     private byte[] readInt96() throws IOException {
         byte[] bytes = new byte[12];
         int read = input.read(bytes);
@@ -219,24 +261,6 @@ public class PlainDecoder implements ValueDecoder {
             throw new IOException("Unexpected EOF while reading INT96");
         }
         return bytes;
-    }
-
-    private float readFloat() throws IOException {
-        byte[] bytes = new byte[4];
-        int read = input.read(bytes);
-        if (read != 4) {
-            throw new IOException("Unexpected EOF while reading FLOAT");
-        }
-        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getFloat();
-    }
-
-    private double readDouble() throws IOException {
-        byte[] bytes = new byte[8];
-        int read = input.read(bytes);
-        if (read != 8) {
-            throw new IOException("Unexpected EOF while reading DOUBLE");
-        }
-        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getDouble();
     }
 
     private byte[] readByteArray() throws IOException {
