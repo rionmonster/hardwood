@@ -43,3 +43,5 @@ out/
 
 .venv
 .docker-venv
+
+**/dependency-reduced-pom.xml

@@ -933,20 +933,24 @@ Run the following command to format the source code and organize the imports as 
 
 ### Running Performance Tests
 
-The performance test module is not included in the default build. To run performance tests against NYC Yellow Taxi Trip data:
+The performance testing modules are not included in the default build. Enable them with `-Pperformance-test`.
+
+#### End-to-End Performance Tests
+
+Compare Hardwood against parquet-java using NYC Yellow Taxi Trip data:
 
 ```shell
 ./mvnw test -Pperformance-test
 ```
 
-This will download test data on the first run (up to ~4GB for the full 2020-2025 dataset).
+This will download test data on the first run (up to ~4GB for the full 2016-2025 dataset).
 
 **Configuration options:**
 
 | Property | Default | Description |
 |----------|---------|-------------|
 | `perf.contenders` | `hardwood` | Which implementations to benchmark: `hardwood`, `parquet-java`, or `all` |
-| `perf.start` | `2020-01` | Start year-month for data range |
+| `perf.start` | `2016-01` | Start year-month for data range |
 | `perf.end` | `2025-11` | End year-month for data range |
 
 **Examples:**
@@ -967,6 +971,54 @@ This will download test data on the first run (up to ~4GB for the full 2020-2025
 # Run for a single month
 ./mvnw test -Pperformance-test -Dperf.start=2025-06 -Dperf.end=2025-06
 ```
+
+#### JMH Micro-Benchmarks
+
+For detailed micro-benchmarks, build the JMH benchmark JAR and run it directly:
+
+```shell
+# Build the benchmark JAR
+./mvnw package -Pperformance-test -pl performance-testing/micro-benchmarks -am -DskipTests
+
+# Run all benchmarks
+java -jar performance-testing/micro-benchmarks/target/benchmarks.jar \
+  -p dataDir=performance-testing/test-data-setup/target/tlc-trip-record-data
+
+# Run a specific benchmark
+java -jar performance-testing/micro-benchmarks/target/benchmarks.jar \
+  "PageDecompressionBenchmark.decodePages" \
+  -p dataDir=performance-testing/test-data-setup/target/tlc-trip-record-data
+
+# Run with custom iterations (e.g., 5x default)
+java -jar performance-testing/micro-benchmarks/target/benchmarks.jar \
+  "PageDecompressionBenchmark.decodePages" \
+  -p dataDir=performance-testing/test-data-setup/target/tlc-trip-record-data \
+  -wi 15 -i 25
+
+# List available benchmarks
+java -jar performance-testing/micro-benchmarks/target/benchmarks.jar -l
+```
+
+**Available benchmarks:**
+
+| Benchmark | Description |
+|-----------|-------------|
+| `MemoryMapBenchmark.memoryMapToByteArray` | Memory map a file and copy to byte array |
+| `PageDecompressionBenchmark.decompressPages` | Scan and decompress all pages |
+| `PageDecompressionBenchmark.decodePages` | Scan, decompress, and decode all pages |
+
+**JMH options:**
+
+| Option | Description |
+|--------|-------------|
+| `-wi <n>` | Number of warmup iterations (default: 3) |
+| `-i <n>` | Number of measurement iterations (default: 5) |
+| `-f <n>` | Number of forks (default: 2) |
+| `-p param=value` | Set benchmark parameter |
+| `-l` | List available benchmarks |
+| `-h` | Show help |
+
+**Note:** The taxi data files use GZIP compression (2016-01 to 2023-01) and ZSTD compression (2023-02 onwards). The default benchmark file is `yellow_tripdata_2025-05.parquet` (ZSTD, 75MB).
 
 ## License
 

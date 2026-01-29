@@ -8,10 +8,6 @@
 package dev.morling.hardwood.perf;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.YearMonth;
@@ -29,7 +25,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.avro.AvroParquetReader;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
@@ -45,15 +40,14 @@ import static org.assertj.core.api.Assertions.withinPercentage;
  * Performance comparison test between Hardwood, and parquet-java.
  *
  * <p>
- * Downloads NYC Yellow Taxi Trip Records and compares reading performance while
- * verifying correctness by comparing calculated sums.
+ * Uses NYC Yellow Taxi Trip Records (downloaded by test-file-setup module) and compares
+ * reading performance while verifying correctness by comparing calculated sums.
  * </p>
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SimplePerformanceTest {
 
-    private static final String BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data/";
-    private static final Path DATA_DIR = Path.of("target/tlc-trip-record-data");
+    private static final Path DATA_DIR = Path.of("../test-data-setup/target/tlc-trip-record-data");
     private static final YearMonth DEFAULT_START = YearMonth.of(2016, 1);
     private static final YearMonth DEFAULT_END = YearMonth.of(2025, 11);
     private static final String CONTENDERS_PROPERTY = "perf.contenders";
@@ -120,24 +114,24 @@ class SimplePerformanceTest {
         return requested.isAfter(DEFAULT_END) ? DEFAULT_END : requested;
     }
 
-    @BeforeAll
-    void downloadData() throws IOException {
-        Files.createDirectories(DATA_DIR);
+    private List<Path> getAvailableFiles() throws IOException {
+        List<Path> files = new ArrayList<>();
         YearMonth start = getStartMonth();
         YearMonth end = getEndMonth();
         for (YearMonth ym = start; !ym.isAfter(end); ym = ym.plusMonths(1)) {
             String filename = String.format("yellow_tripdata_%d-%02d.parquet", ym.getYear(), ym.getMonthValue());
-            Path target = DATA_DIR.resolve(filename);
-            if (!Files.exists(target)) {
-                downloadFile(BASE_URL + filename, target);
+            Path file = DATA_DIR.resolve(filename);
+            if (Files.exists(file) && Files.size(file) > 0) {
+                files.add(file);
             }
         }
+        return files;
     }
 
     @Test
     void comparePerformance() throws IOException {
         List<Path> files = getAvailableFiles();
-        assertThat(files).as("At least one data file should be available").isNotEmpty();
+        assertThat(files).as("At least one data file should be available. Run test-file-setup first.").isNotEmpty();
 
         Set<Contender> enabledContenders = getEnabledContenders();
         assertThat(enabledContenders).as("At least one contender must be enabled").isNotEmpty();
@@ -195,20 +189,6 @@ class SimplePerformanceTest {
             case HARDWOOD -> this::runHardwood;
             case PARQUET_JAVA -> this::runParquetJava;
         };
-    }
-
-    private List<Path> getAvailableFiles() throws IOException {
-        List<Path> files = new ArrayList<>();
-        YearMonth start = getStartMonth();
-        YearMonth end = getEndMonth();
-        for (YearMonth ym = start; !ym.isAfter(end); ym = ym.plusMonths(1)) {
-            String filename = String.format("yellow_tripdata_%d-%02d.parquet", ym.getYear(), ym.getMonthValue());
-            Path file = DATA_DIR.resolve(filename);
-            if (Files.exists(file) && Files.size(file) > 0) {
-                files.add(file);
-            }
-        }
-        return files;
     }
 
     private Result timeRun(String name, Supplier<Result> runner) {
@@ -302,15 +282,11 @@ class SimplePerformanceTest {
     }
 
     private void printResults(int fileCount, Set<Contender> enabledContenders,
-            Result hardwood, Result parquetJava) {
+            Result hardwood, Result parquetJava) throws IOException {
         int cpuCores = Runtime.getRuntime().availableProcessors();
         long totalBytes = 0;
-        try {
-            for (Path file : getAvailableFiles()) {
-                totalBytes += Files.size(file);
-            }
-        }
-        catch (IOException ignored) {
+        for (Path file : getAvailableFiles()) {
+            totalBytes += Files.size(file);
         }
 
         // Use the first available result to get row count
@@ -347,10 +323,10 @@ class SimplePerformanceTest {
         System.out.println("  " + "-".repeat(85));
 
         if (hardwood != null) {
-            printResultRow("Hardwood", hardwood, cpuCores);
+            printResultRow("Hardwood", hardwood, cpuCores, totalBytes);
         }
         if (parquetJava != null) {
-            printResultRow("parquet-java", parquetJava, 1);
+            printResultRow("parquet-java", parquetJava, 1, totalBytes);
         }
 
         // Speedup (only if both contenders ran)
@@ -365,20 +341,10 @@ class SimplePerformanceTest {
         System.out.println("=".repeat(100));
     }
 
-    private void printResultRow(String name, Result result, int cpuCores) {
+    private void printResultRow(String name, Result result, int cpuCores, long totalBytes) {
         double seconds = result.durationMs() / 1000.0;
         double recordsPerSec = result.rowCount() / seconds;
         double recordsPerSecPerCore = recordsPerSec / cpuCores;
-
-        // Estimate MB/sec (rough, based on total file size / time)
-        long totalBytes = 0;
-        try {
-            for (Path file : getAvailableFiles()) {
-                totalBytes += Files.size(file);
-            }
-        }
-        catch (IOException ignored) {
-        }
         double mbPerSec = (totalBytes / (1024.0 * 1024.0)) / seconds;
 
         System.out.println(String.format("  %-20s %12.2f %,15.0f %,18.0f %12.1f",
@@ -387,35 +353,5 @@ class SimplePerformanceTest {
                 recordsPerSec,
                 recordsPerSecPerCore,
                 mbPerSec));
-    }
-
-    private void downloadFile(String url, Path target) {
-        System.out.println("Downloading: " + url);
-        try {
-            HttpClient client = HttpClient.newBuilder()
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .build();
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .GET()
-                    .build();
-            HttpResponse<Path> response = client.send(request,
-                    HttpResponse.BodyHandlers.ofFile(target));
-            if (response.statusCode() != 200) {
-                Files.deleteIfExists(target);
-                System.out.println("  Failed (status " + response.statusCode() + ") - skipping");
-            }
-            else {
-                System.out.println("  Downloaded: " + Files.size(target) + " bytes");
-            }
-        }
-        catch (Exception e) {
-            System.out.println("  Failed: " + e.getMessage() + " - skipping");
-            try {
-                Files.deleteIfExists(target);
-            }
-            catch (IOException ignored) {
-            }
-        }
     }
 }
