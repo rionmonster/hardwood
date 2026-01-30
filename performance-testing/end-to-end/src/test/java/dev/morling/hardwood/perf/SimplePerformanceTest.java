@@ -7,6 +7,9 @@
  */
 package dev.morling.hardwood.perf;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.withinPercentage;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,9 +36,6 @@ import dev.morling.hardwood.reader.ParquetFileReader;
 import dev.morling.hardwood.reader.RowReader;
 import dev.morling.hardwood.schema.SchemaNode;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.withinPercentage;
-
 /**
  * Performance comparison test between Hardwood, and parquet-java.
  *
@@ -55,8 +55,10 @@ class SimplePerformanceTest {
     private static final String END_PROPERTY = "perf.end";
 
     enum Contender {
-        HARDWOOD("Hardwood"),
-        PARQUET_JAVA("parquet-java");
+        HARDWOOD_INDEXED("Hardwood (indexed)"),
+        HARDWOOD_NAMED("Hardwood (named)"),
+        PARQUET_JAVA_INDEXED("parquet-java (indexed)"),
+        PARQUET_JAVA_NAMED("parquet-java (named)");
 
         private final String displayName;
 
@@ -74,6 +76,13 @@ class SimplePerformanceTest {
                     return c;
                 }
             }
+            // Support legacy names for backwards compatibility
+            if (name.equalsIgnoreCase("hardwood")) {
+                return HARDWOOD_INDEXED;
+            }
+            if (name.equalsIgnoreCase("parquet-java") || name.equalsIgnoreCase("parquet_java")) {
+                return PARQUET_JAVA_NAMED;
+            }
             throw new IllegalArgumentException("Unknown contender: " + name +
                     ". Valid values: " + Arrays.toString(values()));
         }
@@ -85,7 +94,7 @@ class SimplePerformanceTest {
     private Set<Contender> getEnabledContenders() {
         String property = System.getProperty(CONTENDERS_PROPERTY);
         if (property == null || property.isBlank()) {
-            return EnumSet.of(Contender.HARDWOOD);
+            return EnumSet.of(Contender.HARDWOOD_INDEXED);
         }
         if (property.equalsIgnoreCase("all")) {
             return EnumSet.allOf(Contender.class);
@@ -151,43 +160,57 @@ class SimplePerformanceTest {
 
         // Timed runs
         System.out.println("\nTimed runs:");
-        Result hardwoodResult = null;
-        Result parquetJavaResult = null;
+        java.util.Map<Contender, Result> results = new java.util.EnumMap<>(Contender.class);
 
         for (Contender contender : enabledContenders) {
             Result result = timeRun(contender.displayName(), () -> getRunner(contender).apply(files));
-            if (contender == Contender.HARDWOOD) {
-                hardwoodResult = result;
-            }
-            else if (contender == Contender.PARQUET_JAVA) {
-                parquetJavaResult = result;
-            }
+            results.put(contender, result);
         }
 
         // Print results
-        printResults(files.size(), enabledContenders, hardwoodResult, parquetJavaResult);
+        printResults(files.size(), enabledContenders, results);
 
-        // Verify correctness - compare against parquet-java as reference (only if both are enabled)
-        if (hardwoodResult != null && parquetJavaResult != null) {
-            // Use relative tolerance for floating-point sums (accumulation error over millions of rows)
-            assertThat(hardwoodResult.passengerCount())
-                    .as("Hardwood passenger_count should match parquet-java")
-                    .isEqualTo(parquetJavaResult.passengerCount());
-            assertThat(hardwoodResult.tripDistance())
-                    .as("Hardwood trip_distance should match parquet-java")
-                    .isCloseTo(parquetJavaResult.tripDistance(), withinPercentage(0.0001));
-            assertThat(hardwoodResult.fareAmount())
-                    .as("Hardwood fare_amount should match parquet-java")
-                    .isCloseTo(parquetJavaResult.fareAmount(), withinPercentage(0.0001));
+        // Verify correctness - compare all results against each other
+        verifyCorrectness(results);
+    }
 
-            System.out.println("\nAll results match!");
+    private void verifyCorrectness(java.util.Map<Contender, Result> results) {
+        if (results.size() < 2) {
+            return;
         }
+
+        // Use first result as reference
+        java.util.Map.Entry<Contender, Result> first = results.entrySet().iterator().next();
+        Result reference = first.getValue();
+        String referenceName = first.getKey().displayName();
+
+        for (java.util.Map.Entry<Contender, Result> entry : results.entrySet()) {
+            if (entry.getKey() == first.getKey()) {
+                continue;
+            }
+            Result other = entry.getValue();
+            String otherName = entry.getKey().displayName();
+
+            assertThat(other.passengerCount())
+                    .as("%s passenger_count should match %s", otherName, referenceName)
+                    .isEqualTo(reference.passengerCount());
+            assertThat(other.tripDistance())
+                    .as("%s trip_distance should match %s", otherName, referenceName)
+                    .isCloseTo(reference.tripDistance(), withinPercentage(0.0001));
+            assertThat(other.fareAmount())
+                    .as("%s fare_amount should match %s", otherName, referenceName)
+                    .isCloseTo(reference.fareAmount(), withinPercentage(0.0001));
+        }
+
+        System.out.println("\nAll results match!");
     }
 
     private Function<List<Path>, Result> getRunner(Contender contender) {
         return switch (contender) {
-            case HARDWOOD -> this::runHardwood;
-            case PARQUET_JAVA -> this::runParquetJava;
+            case HARDWOOD_INDEXED -> this::runHardwoodIndexed;
+            case HARDWOOD_NAMED -> this::runHardwoodNamed;
+            case PARQUET_JAVA_INDEXED -> this::runParquetJavaIndexed;
+            case PARQUET_JAVA_NAMED -> this::runParquetJavaNamed;
         };
     }
 
@@ -200,7 +223,7 @@ class SimplePerformanceTest {
                 result.fareAmount(), duration, result.rowCount());
     }
 
-    private Result runHardwood(List<Path> files) {
+    private Result runHardwoodIndexed(List<Path> files) {
         long passengerCount = 0;
         double tripDistance = 0.0;
         double fareAmount = 0.0;
@@ -248,7 +271,118 @@ class SimplePerformanceTest {
         return new Result(passengerCount, tripDistance, fareAmount, 0, rowCount);
     }
 
-    private Result runParquetJava(List<Path> files) {
+    private Result runHardwoodNamed(List<Path> files) {
+        long passengerCount = 0;
+        double tripDistance = 0.0;
+        double fareAmount = 0.0;
+        long rowCount = 0;
+
+        for (Path file : files) {
+            try (ParquetFileReader reader = ParquetFileReader.open(file);
+                    RowReader rowReader = reader.createRowReader()) {
+
+                // Check column type once per file
+                SchemaNode pcNode = reader.getFileSchema().getField("passenger_count");
+
+                boolean pcIsLong = pcNode instanceof SchemaNode.PrimitiveNode pn
+                        && pn.type() == PhysicalType.INT64;
+
+                while (rowReader.hasNext()) {
+                    rowReader.next();
+                    rowCount++;
+                    if (!rowReader.isNull("passenger_count")) {
+                        if (pcIsLong) {
+                            passengerCount += rowReader.getLong("passenger_count");
+                        }
+                        else {
+                            passengerCount += (long) rowReader.getDouble("passenger_count");
+                        }
+                    }
+
+                    if (!rowReader.isNull("trip_distance")) {
+                        tripDistance += rowReader.getDouble("trip_distance");
+                    }
+
+                    if (!rowReader.isNull("fare_amount")) {
+                        fareAmount += rowReader.getDouble("fare_amount");
+                    }
+                }
+            }
+            catch (IOException e) {
+                throw new RuntimeException("Failed to read file: " + file, e);
+            }
+        }
+        return new Result(passengerCount, tripDistance, fareAmount, 0, rowCount);
+    }
+
+    private Result runParquetJavaIndexed(List<Path> files) {
+        long passengerCount = 0;
+        double tripDistance = 0.0;
+        double fareAmount = 0.0;
+        long rowCount = 0;
+        Configuration conf = new Configuration();
+
+        for (Path file : files) {
+            org.apache.hadoop.fs.Path hadoopPath = new org.apache.hadoop.fs.Path(file.toUri());
+            try (ParquetReader<GenericRecord> reader = AvroParquetReader
+                    .<GenericRecord> builder(HadoopInputFile.fromPath(hadoopPath, conf))
+                    .build()) {
+                GenericRecord record;
+
+                // Resolve field indices once per file using the schema
+                int pcIndex = -1;
+                int tdIndex = -1;
+                int faIndex = -1;
+
+                record = reader.read();
+                if (record != null) {
+                    org.apache.avro.Schema schema = record.getSchema();
+                    pcIndex = schema.getField("passenger_count").pos();
+                    tdIndex = schema.getField("trip_distance").pos();
+                    faIndex = schema.getField("fare_amount").pos();
+
+                    // Process first record
+                    rowCount++;
+                    Long pc = (Long) record.get(pcIndex);
+                    if (pc != null) {
+                        passengerCount += pc;
+                    }
+                    Double td = (Double) record.get(tdIndex);
+                    if (td != null) {
+                        tripDistance += td;
+                    }
+                    Double fa = (Double) record.get(faIndex);
+                    if (fa != null) {
+                        fareAmount += fa;
+                    }
+                }
+
+                while ((record = reader.read()) != null) {
+                    rowCount++;
+                    Long pc = (Long) record.get(pcIndex);
+                    if (pc != null) {
+                        passengerCount += pc;
+                    }
+
+                    Double td = (Double) record.get(tdIndex);
+                    if (td != null) {
+                        tripDistance += td;
+                    }
+
+                    Double fa = (Double) record.get(faIndex);
+                    if (fa != null) {
+                        fareAmount += fa;
+                    }
+                }
+            }
+            catch (IOException e) {
+                throw new RuntimeException("Failed to read file: " + file, e);
+            }
+        }
+        return new Result(passengerCount, tripDistance, fareAmount, 0, rowCount);
+    }
+
+    private Result runParquetJavaNamed(List<Path> files) {
         long passengerCount = 0;
         double tripDistance = 0.0;
         double fareAmount = 0.0;
@@ -287,7 +421,7 @@ class SimplePerformanceTest {
     }
 
     private void printResults(int fileCount, Set<Contender> enabledContenders,
-            Result hardwood, Result parquetJava) throws IOException {
+            java.util.Map<Contender, Result> results) throws IOException {
         int cpuCores = Runtime.getRuntime().availableProcessors();
         long totalBytes = 0;
         for (Path file : getAvailableFiles()) {
@@ -295,7 +429,7 @@ class SimplePerformanceTest {
         }
 
         // Use the first available result to get row count
-        Result firstResult = hardwood != null ? hardwood : parquetJava;
+        Result firstResult = results.values().iterator().next();
 
         System.out.println("\n" + "=".repeat(100));
         System.out.println("PERFORMANCE TEST RESULTS");
@@ -312,38 +446,37 @@ class SimplePerformanceTest {
         System.out.println("  Total size:      " + String.format("%,.1f MB", totalBytes / (1024.0 * 1024.0)));
         System.out.println();
 
-        // Correctness verification (only if both contenders ran)
-        if (hardwood != null && parquetJava != null) {
+        // Correctness verification (only if multiple contenders ran)
+        if (results.size() > 1) {
             System.out.println("Correctness Verification:");
-            System.out.println(String.format("  %-20s %17s %17s %17s", "", "passenger_count", "trip_distance", "fare_amount"));
-            System.out.println(String.format("  %-20s %,17d %,17.2f %,17.2f", "Hardwood", hardwood.passengerCount(), hardwood.tripDistance(), hardwood.fareAmount()));
-            System.out.println(String.format("  %-20s %,17d %,17.2f %,17.2f", "parquet-java", parquetJava.passengerCount(), parquetJava.tripDistance(), parquetJava.fareAmount()));
+            System.out.println(String.format("  %-25s %17s %17s %17s", "", "passenger_count", "trip_distance", "fare_amount"));
+            for (java.util.Map.Entry<Contender, Result> entry : results.entrySet()) {
+                Result r = entry.getValue();
+                System.out.println(String.format("  %-25s %,17d %,17.2f %,17.2f",
+                        entry.getKey().displayName(), r.passengerCount(), r.tripDistance(), r.fareAmount()));
+            }
             System.out.println();
         }
 
         // Performance comparison
         System.out.println("Performance:");
-        System.out.println(String.format("  %-20s %12s %15s %18s %12s",
+        System.out.println(String.format("  %-25s %12s %15s %18s %12s",
                 "Contender", "Time (s)", "Records/sec", "Records/sec/core", "MB/sec"));
-        System.out.println("  " + "-".repeat(85));
+        System.out.println("  " + "-".repeat(90));
 
-        if (hardwood != null) {
-            printResultRow("Hardwood", hardwood, cpuCores, totalBytes);
-        }
-        if (parquetJava != null) {
-            printResultRow("parquet-java", parquetJava, 1, totalBytes);
+        for (java.util.Map.Entry<Contender, Result> entry : results.entrySet()) {
+            Contender c = entry.getKey();
+            // Hardwood uses parallelism (all cores), parquet-java is single-threaded
+            int cores = isHardwood(c) ? cpuCores : 1;
+            printResultRow(c.displayName(), entry.getValue(), cores, totalBytes);
         }
 
-        // Speedup (only if both contenders ran)
-        if (hardwood != null && parquetJava != null) {
-            System.out.println();
-            double speedup = (double) parquetJava.durationMs() / hardwood.durationMs();
-            System.out.println(String.format("  Speedup: %.2fx %s",
-                    speedup,
-                    speedup > 1 ? "(Hardwood is faster)" : "(parquet-java is faster)"));
-        }
         System.out.println();
         System.out.println("=".repeat(100));
+    }
+
+    private boolean isHardwood(Contender c) {
+        return c == Contender.HARDWOOD_INDEXED || c == Contender.HARDWOOD_NAMED;
     }
 
     private void printResultRow(String name, Result result, int cpuCores, long totalBytes) {
@@ -352,7 +485,7 @@ class SimplePerformanceTest {
         double recordsPerSecPerCore = recordsPerSec / cpuCores;
         double mbPerSec = (totalBytes / (1024.0 * 1024.0)) / seconds;
 
-        System.out.println(String.format("  %-20s %12.2f %,15.0f %,18.0f %12.1f",
+        System.out.println(String.format("  %-25s %12.2f %,15.0f %,18.0f %12.1f",
                 name,
                 seconds,
                 recordsPerSec,

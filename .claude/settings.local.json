@@ -86,7 +86,8 @@
       "Bash(parquet-tools meta:*)",
       "Bash(sort:*)",
       "Bash(git add:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "WebFetch(domain:avro.apache.org)"
     ]
   }
 }
