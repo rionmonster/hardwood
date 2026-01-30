@@ -116,7 +116,7 @@ abstract class AbstractRowReader implements RowReader {
         iterators = new ColumnValueIterator[columnCount];
         for (int i = 0; i < columnCount; i++) {
             PageCursor pageCursor = new PageCursor(pageInfosByColumn.get(i), executor);
-            iterators[i] = new ColumnValueIterator(pageCursor, schema.getColumn(i), executor, schema.isFlatSchema());
+            iterators[i] = new ColumnValueIterator(pageCursor, schema.getColumn(i), schema.isFlatSchema());
         }
 
         onInitialize();
@@ -171,7 +171,7 @@ abstract class AbstractRowReader implements RowReader {
         CompletableFuture<TypedColumnData>[] futures = new CompletableFuture[iterators.length];
         for (int i = 0; i < iterators.length; i++) {
             final int col = i;
-            futures[i] = CompletableFuture.supplyAsync(() -> iterators[col].prefetch(BATCH_SIZE), executor);
+            futures[i] = CompletableFuture.supplyAsync(() -> iterators[col].readBatch(BATCH_SIZE), executor);
         }
 
         CompletableFuture.allOf(futures).join();

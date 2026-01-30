@@ -7,41 +7,25 @@
  */
 package dev.morling.hardwood.internal.reader;
 
-import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.Deque;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 
 import dev.morling.hardwood.schema.ColumnSchema;
 
 /**
- * Reads column values from pages and prefetches them into TypedColumnData batches.
+ * Reads column values from pages into TypedColumnData batches.
  *
- * <p>This class uses async prefetching with adaptive depth to ensure that
- * TypedColumnData is typically ready before it's needed. The prefetch depth
- * automatically adapts based on whether batches are ready when requested:</p>
- * <ul>
- *   <li>If prefetch() finds the batch ready (hit), depth may decrease</li>
- *   <li>If prefetch() has to wait for a batch (miss), depth increases</li>
- * </ul>
+ * <p>Batch computation is done synchronously when requested. Page-level prefetching
+ * (handled by {@link PageCursor}) ensures decoded pages are ready, while column-level
+ * parallelism (handled by the row reader) ensures all columns compute in parallel.</p>
  *
- * <p>For flat schemas, use {@link #prefetch(int)} which copies directly into
- * typed primitive arrays. For nested schemas, it handles repetition levels.</p>
+ * <p>For flat schemas, {@link #readBatch(int)} copies directly into typed primitive
+ * arrays. For nested schemas, it tracks repetition/definition levels.</p>
  */
 public class ColumnValueIterator {
 
-    private static final System.Logger LOG = System.getLogger(ColumnValueIterator.class.getName());
-
-    private static final int INITIAL_PREFETCH_DEPTH = 1;
-    private static final int MAX_PREFETCH_DEPTH = 4;
-    private static final int HITS_TO_DECREASE = 10;
-    private static final int MISSES_TO_INCREASE = 1;
-
     private final PageCursor pageCursor;
     private final ColumnSchema column;
-    private final Executor executor;
     private final int maxDefinitionLevel;
     private final boolean flatSchema;
 
@@ -49,120 +33,39 @@ public class ColumnValueIterator {
     private int position;
     private int currentRecordStart;
     private boolean recordActive;
-
-    // Async prefetch state
-    private final Deque<CompletableFuture<TypedColumnData>> prefetchQueue = new ArrayDeque<>();
-    private int prefetchBatchSize;
-    private int targetPrefetchDepth = INITIAL_PREFETCH_DEPTH;
-    private int hitCount = 0;
-    private int missCount = 0;
     private boolean exhausted = false;
 
-    public ColumnValueIterator(PageCursor pageCursor, ColumnSchema column, Executor executor, boolean flatSchema) {
+    public ColumnValueIterator(PageCursor pageCursor, ColumnSchema column, boolean flatSchema) {
         this.pageCursor = pageCursor;
         this.column = column;
-        this.executor = executor;
         this.maxDefinitionLevel = column.maxDefinitionLevel();
         this.flatSchema = flatSchema;
     }
 
-    // ==================== Batch Prefetch ====================
+    // ==================== Batch Reading ====================
 
     /**
-     * Prefetch values for up to {@code maxRecords} records into typed arrays.
-     * Uses async prefetching to ensure the next batch is typically ready.
+     * Read values for up to {@code maxRecords} records into typed arrays.
      *
-     * @param maxRecords maximum number of records to prefetch
+     * <p>Page-level prefetching ensures decoded pages are typically ready.
+     * Column-level parallelism is handled by the row reader calling this
+     * method on all columns concurrently.</p>
+     *
+     * @param maxRecords maximum number of records to read
      * @return typed column data containing values, levels, and record boundaries
      */
-    public TypedColumnData prefetch(int maxRecords) {
+    public TypedColumnData readBatch(int maxRecords) {
         if (exhausted) {
             return emptyTypedColumnData();
         }
 
-        TypedColumnData result;
-
-        // Check if we have a prefetched batch ready
-        if (!prefetchQueue.isEmpty() && prefetchBatchSize == maxRecords) {
-            CompletableFuture<TypedColumnData> future = prefetchQueue.pollFirst();
-
-            if (future.isDone()) {
-                // Hit: prefetch was ready
-                hitCount++;
-                missCount = 0;
-                if (hitCount >= HITS_TO_DECREASE && targetPrefetchDepth > INITIAL_PREFETCH_DEPTH) {
-                    targetPrefetchDepth--;
-                    hitCount = 0;
-                    LOG.log(System.Logger.Level.DEBUG, "Decreasing prefetch depth for column ''{0}'' to {1}",
-                            column.name(), targetPrefetchDepth);
-                }
-            }
-            else {
-                // Miss: had to wait
-                LOG.log(System.Logger.Level.DEBUG, "Prefetch miss for column ''{0}'', current depth={1}",
-                        column.name(), targetPrefetchDepth);
-                missCount++;
-                hitCount = 0;
-                if (missCount >= MISSES_TO_INCREASE && targetPrefetchDepth < MAX_PREFETCH_DEPTH) {
-                    targetPrefetchDepth++;
-                    LOG.log(System.Logger.Level.DEBUG, "Increasing prefetch depth for column ''{0}'' to {1}",
-                            column.name(), targetPrefetchDepth);
-                    missCount = 0;
-                }
-            }
-
-            result = future.join();
-        }
-        else {
-            // No prefetch available or wrong batch size - clear queue and compute synchronously
-            LOG.log(System.Logger.Level.DEBUG, "Prefetch queue empty for column ''{0}'', computing synchronously",
-                    column.name());
-            prefetchQueue.clear();
-            result = computeBatch(maxRecords);
-        }
+        TypedColumnData result = flatSchema ? computeFlatBatch(maxRecords) : computeNestedBatch(maxRecords);
 
         if (result.recordCount() == 0) {
             exhausted = true;
         }
-        else {
-            // Fill prefetch queue up to target depth
-            fillPrefetchQueue(maxRecords);
-        }
 
         return result;
-    }
-
-    /**
-     * Fill the prefetch queue up to targetPrefetchDepth.
-     * Batches are chained sequentially since each depends on state from the previous.
-     */
-    private void fillPrefetchQueue(int maxRecords) {
-        prefetchBatchSize = maxRecords;
-        int toAdd = targetPrefetchDepth - prefetchQueue.size();
-        for (int i = 0; i < toAdd && !exhausted; i++) {
-            // Chain each batch after the previous one to maintain sequential computation
-            CompletableFuture<TypedColumnData> previous = prefetchQueue.peekLast();
-            CompletableFuture<TypedColumnData> next;
-            if (previous == null) {
-                // First in queue - start immediately
-                next = CompletableFuture.supplyAsync(() -> computeBatch(maxRecords), executor);
-            }
-            else {
-                // Chain after previous batch completes
-                next = previous.thenApplyAsync(ignored -> computeBatch(maxRecords), executor);
-            }
-            prefetchQueue.addLast(next);
-        }
-    }
-
-    /**
-     * Compute a batch synchronously from current state.
-     */
-    private TypedColumnData computeBatch(int maxRecords) {
-        if (flatSchema) {
-            return computeFlatBatch(maxRecords);
-        }
-        return computeNestedBatch(maxRecords);
     }
 
     /**
