@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.BitSet;
 import java.util.UUID;
 
 import dev.morling.hardwood.internal.conversion.LogicalTypeConverter;
@@ -34,8 +35,10 @@ final class BenchmarkRowReader {
     private final FileSchema schema;
 
     private TypedColumnData[] columnData;
-    private int rowIndex = -1;
+    private BitSet[] nulls;
     private int recordCount = 0;
+
+    private int rowIndex = -1;
 
     BenchmarkRowReader(FileSchema schema) {
         this.schema = schema;
@@ -48,6 +51,11 @@ final class BenchmarkRowReader {
         this.columnData = newColumnData;
         this.rowIndex = -1;
         this.recordCount = newColumnData.length > 0 ? newColumnData[0].recordCount() : 0;
+
+        this.nulls = new BitSet[newColumnData.length];
+        for (int i = 0; i < newColumnData.length; i++) {
+			nulls[i] = newColumnData[i].nulls();
+		}
     }
 
     boolean hasNext() {
@@ -62,7 +70,7 @@ final class BenchmarkRowReader {
 
     int getInt(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.IntColumn) data).get(rowIndex);
@@ -70,7 +78,7 @@ final class BenchmarkRowReader {
 
     long getLong(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.LongColumn) data).get(rowIndex);
@@ -78,7 +86,7 @@ final class BenchmarkRowReader {
 
     float getFloat(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.FloatColumn) data).get(rowIndex);
@@ -86,7 +94,7 @@ final class BenchmarkRowReader {
 
     double getDouble(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.DoubleColumn) data).get(rowIndex);
@@ -94,7 +102,7 @@ final class BenchmarkRowReader {
 
     boolean getBoolean(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.BooleanColumn) data).get(rowIndex);
@@ -104,7 +112,7 @@ final class BenchmarkRowReader {
 
     String getString(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             return null;
         }
         return new String(((TypedColumnData.ByteArrayColumn) data).get(rowIndex), StandardCharsets.UTF_8);
@@ -112,7 +120,7 @@ final class BenchmarkRowReader {
 
     byte[] getBinary(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             return null;
         }
         return ((TypedColumnData.ByteArrayColumn) data).get(rowIndex);
@@ -120,7 +128,7 @@ final class BenchmarkRowReader {
 
     LocalDate getDate(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             return null;
         }
         ColumnSchema col = schema.getColumn(columnIndex);
@@ -130,7 +138,7 @@ final class BenchmarkRowReader {
 
     LocalTime getTime(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             return null;
         }
         ColumnSchema col = schema.getColumn(columnIndex);
@@ -146,7 +154,7 @@ final class BenchmarkRowReader {
 
     Instant getTimestamp(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             return null;
         }
         ColumnSchema col = schema.getColumn(columnIndex);
@@ -156,7 +164,7 @@ final class BenchmarkRowReader {
 
     BigDecimal getDecimal(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             return null;
         }
         ColumnSchema col = schema.getColumn(columnIndex);
@@ -171,7 +179,7 @@ final class BenchmarkRowReader {
 
     UUID getUuid(int columnIndex) {
         TypedColumnData data = columnData[columnIndex];
-        if (data.isNull(rowIndex)) {
+        if (isNull(columnIndex)) {
             return null;
         }
         ColumnSchema col = schema.getColumn(columnIndex);
@@ -181,6 +189,7 @@ final class BenchmarkRowReader {
     // ==================== Metadata ====================
 
     boolean isNull(int columnIndex) {
-        return columnData[columnIndex].isNull(rowIndex);
+        BitSet columnNulls = nulls[columnIndex];
+        return columnNulls != null && columnNulls.get(rowIndex) == true;
     }
 }
