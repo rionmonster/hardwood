@@ -193,23 +193,44 @@ try (ParquetFileReader fileReader = ParquetFileReader.open(path);
 
 **Typed accessor methods:**
 
+All accessor methods are available in two forms:
+- **Name-based** (e.g., `getInt("column_name")`) - convenient for ad-hoc access
+- **Index-based** (e.g., `getInt(columnIndex)`) - faster for performance-critical loops
+
 | Method | Physical/Logical Type | Java Type |
 |--------|----------------------|-----------|
-| `getBoolean(name)` | BOOLEAN | `boolean` |
-| `getInt(name)` | INT32 | `int` |
-| `getLong(name)` | INT64 | `long` |
-| `getFloat(name)` | FLOAT | `float` |
-| `getDouble(name)` | DOUBLE | `double` |
-| `getBinary(name)` | BYTE_ARRAY | `byte[]` |
-| `getString(name)` | STRING logical type | `String` |
-| `getDate(name)` | DATE logical type | `LocalDate` |
-| `getTime(name)` | TIME logical type | `LocalTime` |
-| `getTimestamp(name)` | TIMESTAMP logical type | `Instant` |
-| `getDecimal(name)` | DECIMAL logical type | `BigDecimal` |
-| `getUuid(name)` | UUID logical type | `UUID` |
+| `getBoolean(name)` / `getBoolean(index)` | BOOLEAN | `boolean` |
+| `getInt(name)` / `getInt(index)` | INT32 | `int` |
+| `getLong(name)` / `getLong(index)` | INT64 | `long` |
+| `getFloat(name)` / `getFloat(index)` | FLOAT | `float` |
+| `getDouble(name)` / `getDouble(index)` | DOUBLE | `double` |
+| `getBinary(name)` / `getBinary(index)` | BYTE_ARRAY | `byte[]` |
+| `getString(name)` / `getString(index)` | STRING logical type | `String` |
+| `getDate(name)` / `getDate(index)` | DATE logical type | `LocalDate` |
+| `getTime(name)` / `getTime(index)` | TIME logical type | `LocalTime` |
+| `getTimestamp(name)` / `getTimestamp(index)` | TIMESTAMP logical type | `Instant` |
+| `getDecimal(name)` / `getDecimal(index)` | DECIMAL logical type | `BigDecimal` |
+| `getUuid(name)` / `getUuid(index)` | UUID logical type | `UUID` |
 | `getStruct(name)` | Nested struct | `PqStruct` |
 | `getList(name)` | LIST logical type | `PqList` |
 | `getMap(name)` | MAP logical type | `PqMap` |
+| `isNull(name)` / `isNull(index)` | Any | `boolean` |
+
+**Index-based access example:**
+
+```java
+// Get column indices once (before the loop)
+int idIndex = fileReader.getFileSchema().getColumn("id").columnIndex();
+int nameIndex = fileReader.getFileSchema().getColumn("name").columnIndex();
+
+while (rowReader.hasNext()) {
+    rowReader.next();
+    if (!rowReader.isNull(idIndex)) {
+        long id = rowReader.getLong(idIndex);      // No name lookup per row
+        String name = rowReader.getString(nameIndex);
+    }
+}
+```
 
 **Type validation:** The API validates at runtime that the requested type matches the schema. Mismatches throw `IllegalArgumentException` with a descriptive message.
 

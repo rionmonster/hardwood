@@ -64,55 +64,75 @@ final class NestedRowReader extends AbstractRowReader {
 
     @Override
     public int getInt(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        Integer val = ValueConverter.convertToInt(currentRow.getChild(index), fieldSchema);
+        return getInt(getFieldIndex(name));
+    }
+
+    @Override
+    public int getInt(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        Integer val = ValueConverter.convertToInt(currentRow.getChild(columnIndex), fieldSchema);
         if (val == null) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return val;
     }
 
     @Override
     public long getLong(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        Long val = ValueConverter.convertToLong(currentRow.getChild(index), fieldSchema);
+        return getLong(getFieldIndex(name));
+    }
+
+    @Override
+    public long getLong(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        Long val = ValueConverter.convertToLong(currentRow.getChild(columnIndex), fieldSchema);
         if (val == null) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return val;
     }
 
     @Override
     public float getFloat(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        Float val = ValueConverter.convertToFloat(currentRow.getChild(index), fieldSchema);
+        return getFloat(getFieldIndex(name));
+    }
+
+    @Override
+    public float getFloat(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        Float val = ValueConverter.convertToFloat(currentRow.getChild(columnIndex), fieldSchema);
         if (val == null) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return val;
     }
 
     @Override
     public double getDouble(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        Double val = ValueConverter.convertToDouble(currentRow.getChild(index), fieldSchema);
+        return getDouble(getFieldIndex(name));
+    }
+
+    @Override
+    public double getDouble(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        Double val = ValueConverter.convertToDouble(currentRow.getChild(columnIndex), fieldSchema);
         if (val == null) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return val;
     }
 
     @Override
     public boolean getBoolean(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        Boolean val = ValueConverter.convertToBoolean(currentRow.getChild(index), fieldSchema);
+        return getBoolean(getFieldIndex(name));
+    }
+
+    @Override
+    public boolean getBoolean(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        Boolean val = ValueConverter.convertToBoolean(currentRow.getChild(columnIndex), fieldSchema);
         if (val == null) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return val;
     }
@@ -121,51 +141,79 @@ final class NestedRowReader extends AbstractRowReader {
 
     @Override
     public String getString(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        return ValueConverter.convertToString(currentRow.getChild(index), fieldSchema);
+        return getString(getFieldIndex(name));
+    }
+
+    @Override
+    public String getString(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        return ValueConverter.convertToString(currentRow.getChild(columnIndex), fieldSchema);
     }
 
     @Override
     public byte[] getBinary(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        return ValueConverter.convertToBinary(currentRow.getChild(index), fieldSchema);
+        return getBinary(getFieldIndex(name));
+    }
+
+    @Override
+    public byte[] getBinary(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        return ValueConverter.convertToBinary(currentRow.getChild(columnIndex), fieldSchema);
     }
 
     @Override
     public LocalDate getDate(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        return ValueConverter.convertToDate(currentRow.getChild(index), fieldSchema);
+        return getDate(getFieldIndex(name));
+    }
+
+    @Override
+    public LocalDate getDate(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        return ValueConverter.convertToDate(currentRow.getChild(columnIndex), fieldSchema);
     }
 
     @Override
     public LocalTime getTime(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        return ValueConverter.convertToTime(currentRow.getChild(index), fieldSchema);
+        return getTime(getFieldIndex(name));
+    }
+
+    @Override
+    public LocalTime getTime(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        return ValueConverter.convertToTime(currentRow.getChild(columnIndex), fieldSchema);
     }
 
     @Override
     public Instant getTimestamp(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        return ValueConverter.convertToTimestamp(currentRow.getChild(index), fieldSchema);
+        return getTimestamp(getFieldIndex(name));
+    }
+
+    @Override
+    public Instant getTimestamp(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        return ValueConverter.convertToTimestamp(currentRow.getChild(columnIndex), fieldSchema);
     }
 
     @Override
     public BigDecimal getDecimal(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        return ValueConverter.convertToDecimal(currentRow.getChild(index), fieldSchema);
+        return getDecimal(getFieldIndex(name));
+    }
+
+    @Override
+    public BigDecimal getDecimal(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        return ValueConverter.convertToDecimal(currentRow.getChild(columnIndex), fieldSchema);
     }
 
     @Override
     public UUID getUuid(String name) {
-        int index = getFieldIndex(name);
-        SchemaNode fieldSchema = schema.getRootNode().children().get(index);
-        return ValueConverter.convertToUuid(currentRow.getChild(index), fieldSchema);
+        return getUuid(getFieldIndex(name));
+    }
+
+    @Override
+    public UUID getUuid(int columnIndex) {
+        SchemaNode fieldSchema = schema.getRootNode().children().get(columnIndex);
+        return ValueConverter.convertToUuid(currentRow.getChild(columnIndex), fieldSchema);
     }
 
     // ==================== Nested Type Accessors ====================
@@ -223,7 +271,12 @@ final class NestedRowReader extends AbstractRowReader {
 
     @Override
     public boolean isNull(String name) {
-        return currentRow.getChild(getFieldIndex(name)) == null;
+        return isNull(getFieldIndex(name));
+    }
+
+    @Override
+    public boolean isNull(int columnIndex) {
+        return currentRow.getChild(columnIndex) == null;
     }
 
     @Override

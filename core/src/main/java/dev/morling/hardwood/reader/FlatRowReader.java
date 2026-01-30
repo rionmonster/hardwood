@@ -55,10 +55,14 @@ final class FlatRowReader extends AbstractRowReader {
     public int getInt(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.INT32);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getInt(col.columnIndex());
+    }
+
+    @Override
+    public int getInt(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.IntColumn) data).get(rowIndex);
     }
@@ -67,10 +71,14 @@ final class FlatRowReader extends AbstractRowReader {
     public long getLong(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.INT64);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getLong(col.columnIndex());
+    }
+
+    @Override
+    public long getLong(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.LongColumn) data).get(rowIndex);
     }
@@ -79,10 +87,14 @@ final class FlatRowReader extends AbstractRowReader {
     public float getFloat(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.FLOAT);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getFloat(col.columnIndex());
+    }
+
+    @Override
+    public float getFloat(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.FloatColumn) data).get(rowIndex);
     }
@@ -91,10 +103,14 @@ final class FlatRowReader extends AbstractRowReader {
     public double getDouble(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.DOUBLE);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getDouble(col.columnIndex());
+    }
+
+    @Override
+    public double getDouble(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.DoubleColumn) data).get(rowIndex);
     }
@@ -103,10 +119,14 @@ final class FlatRowReader extends AbstractRowReader {
     public boolean getBoolean(String name) {
         ColumnSchema col = schema.getColumn(name);
         validatePhysicalType(col, PhysicalType.BOOLEAN);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getBoolean(col.columnIndex());
+    }
+
+    @Override
+    public boolean getBoolean(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
-            throw new NullPointerException("Field '" + name + "' is null");
+            throw new NullPointerException("Column " + columnIndex + " is null");
         }
         return ((TypedColumnData.BooleanColumn) data).get(rowIndex);
     }
@@ -115,9 +135,12 @@ final class FlatRowReader extends AbstractRowReader {
 
     @Override
     public String getString(String name) {
-        ColumnSchema col = schema.getColumn(name);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getString(schema.getColumn(name).columnIndex());
+    }
+
+    @Override
+    public String getString(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
             return null;
         }
@@ -126,9 +149,12 @@ final class FlatRowReader extends AbstractRowReader {
 
     @Override
     public byte[] getBinary(String name) {
-        ColumnSchema col = schema.getColumn(name);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getBinary(schema.getColumn(name).columnIndex());
+    }
+
+    @Override
+    public byte[] getBinary(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
             return null;
         }
@@ -137,24 +163,32 @@ final class FlatRowReader extends AbstractRowReader {
 
     @Override
     public LocalDate getDate(String name) {
-        ColumnSchema col = schema.getColumn(name);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getDate(schema.getColumn(name).columnIndex());
+    }
+
+    @Override
+    public LocalDate getDate(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
             return null;
         }
+        ColumnSchema col = schema.getColumn(columnIndex);
         int rawValue = ((TypedColumnData.IntColumn) data).get(rowIndex);
         return LogicalTypeConverter.convertToDate(rawValue, col.type());
     }
 
     @Override
     public LocalTime getTime(String name) {
-        ColumnSchema col = schema.getColumn(name);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getTime(schema.getColumn(name).columnIndex());
+    }
+
+    @Override
+    public LocalTime getTime(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
             return null;
         }
+        ColumnSchema col = schema.getColumn(columnIndex);
         Object rawValue;
         if (col.type() == PhysicalType.INT32) {
             rawValue = ((TypedColumnData.IntColumn) data).get(rowIndex);
@@ -167,24 +201,32 @@ final class FlatRowReader extends AbstractRowReader {
 
     @Override
     public Instant getTimestamp(String name) {
-        ColumnSchema col = schema.getColumn(name);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getTimestamp(schema.getColumn(name).columnIndex());
+    }
+
+    @Override
+    public Instant getTimestamp(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
             return null;
         }
+        ColumnSchema col = schema.getColumn(columnIndex);
         long rawValue = ((TypedColumnData.LongColumn) data).get(rowIndex);
         return LogicalTypeConverter.convertToTimestamp(rawValue, col.type(), (LogicalType.TimestampType) col.logicalType());
     }
 
     @Override
     public BigDecimal getDecimal(String name) {
-        ColumnSchema col = schema.getColumn(name);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getDecimal(schema.getColumn(name).columnIndex());
+    }
+
+    @Override
+    public BigDecimal getDecimal(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
             return null;
         }
+        ColumnSchema col = schema.getColumn(columnIndex);
         Object rawValue = switch (col.type()) {
             case INT32 -> ((TypedColumnData.IntColumn) data).get(rowIndex);
             case INT64 -> ((TypedColumnData.LongColumn) data).get(rowIndex);
@@ -196,12 +238,16 @@ final class FlatRowReader extends AbstractRowReader {
 
     @Override
     public UUID getUuid(String name) {
-        ColumnSchema col = schema.getColumn(name);
-        int idx = col.columnIndex();
-        TypedColumnData data = columnData[idx];
+        return getUuid(schema.getColumn(name).columnIndex());
+    }
+
+    @Override
+    public UUID getUuid(int columnIndex) {
+        TypedColumnData data = columnData[columnIndex];
         if (data.isNull(rowIndex)) {
             return null;
         }
+        ColumnSchema col = schema.getColumn(columnIndex);
         return LogicalTypeConverter.convertToUuid(((TypedColumnData.ByteArrayColumn) data).get(rowIndex), col.type());
     }
 
@@ -254,9 +300,12 @@ final class FlatRowReader extends AbstractRowReader {
 
     @Override
     public boolean isNull(String name) {
-        ColumnSchema col = schema.getColumn(name);
-        int idx = col.columnIndex();
-        return columnData[idx].isNull(rowIndex);
+        return isNull(schema.getColumn(name).columnIndex());
+    }
+
+    @Override
+    public boolean isNull(int columnIndex) {
+        return columnData[columnIndex].isNull(rowIndex);
     }
 
     @Override

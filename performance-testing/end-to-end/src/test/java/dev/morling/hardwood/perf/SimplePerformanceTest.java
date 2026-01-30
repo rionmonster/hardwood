@@ -212,27 +212,32 @@ class SimplePerformanceTest {
 
                 // Check column type once per file
                 SchemaNode pcNode = reader.getFileSchema().getField("passenger_count");
+
                 boolean pcIsLong = pcNode instanceof SchemaNode.PrimitiveNode pn
                         && pn.type() == PhysicalType.INT64;
+
+                int passengerCountIndex = reader.getFileSchema().getColumn("passenger_count").columnIndex();
+                int tripDistanceIndex = reader.getFileSchema().getColumn("trip_distance").columnIndex();
+                int fareAmountIndex = reader.getFileSchema().getColumn("fare_amount").columnIndex();
 
                 while (rowReader.hasNext()) {
                     rowReader.next();
                     rowCount++;
-                    if (!rowReader.isNull("passenger_count")) {
+                    if (!rowReader.isNull(passengerCountIndex)) {
                         if (pcIsLong) {
-                            passengerCount += rowReader.getLong("passenger_count");
+                            passengerCount += rowReader.getLong(passengerCountIndex);
                         }
                         else {
-                            passengerCount += (long) rowReader.getDouble("passenger_count");
+                            passengerCount += (long) rowReader.getDouble(passengerCountIndex);
                         }
                     }
 
-                    if (!rowReader.isNull("trip_distance")) {
-                        tripDistance += rowReader.getDouble("trip_distance");
+                    if (!rowReader.isNull(tripDistanceIndex)) {
+                        tripDistance += rowReader.getDouble(tripDistanceIndex);
                     }
 
-                    if (!rowReader.isNull("fare_amount")) {
-                        fareAmount += rowReader.getDouble("fare_amount");
+                    if (!rowReader.isNull(fareAmountIndex)) {
+                        fareAmount += rowReader.getDouble(fareAmountIndex);
                     }
                 }
             }

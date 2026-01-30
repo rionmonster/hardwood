@@ -54,7 +54,7 @@ public interface RowReader extends AutoCloseable {
     @Override
     void close();
 
-    // ==================== Primitive Type Accessors ====================
+    // ==================== Primitive Type Accessors (by name) ====================
 
     /**
      * Get an INT32 field value by name.
@@ -91,7 +91,49 @@ public interface RowReader extends AutoCloseable {
      */
     boolean getBoolean(String name);
 
-    // ==================== Object Type Accessors ====================
+    // ==================== Primitive Type Accessors (by index) ====================
+
+    /**
+     * Get an INT32 field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @throws NullPointerException if the field is null
+     */
+    int getInt(int columnIndex);
+
+    /**
+     * Get an INT64 field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @throws NullPointerException if the field is null
+     */
+    long getLong(int columnIndex);
+
+    /**
+     * Get a FLOAT field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @throws NullPointerException if the field is null
+     */
+    float getFloat(int columnIndex);
+
+    /**
+     * Get a DOUBLE field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @throws NullPointerException if the field is null
+     */
+    double getDouble(int columnIndex);
+
+    /**
+     * Get a BOOLEAN field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @throws NullPointerException if the field is null
+     */
+    boolean getBoolean(int columnIndex);
+
+    // ==================== Object Type Accessors (by name) ====================
 
     /**
      * Get a STRING field value by name.
@@ -141,6 +183,64 @@ public interface RowReader extends AutoCloseable {
      * @return the UUID value, or null if the field is null
      */
     UUID getUuid(String name);
+
+    // ==================== Object Type Accessors (by index) ====================
+
+    /**
+     * Get a STRING field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @return the string value, or null if the field is null
+     */
+    String getString(int columnIndex);
+
+    /**
+     * Get a BINARY field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @return the binary value, or null if the field is null
+     */
+    byte[] getBinary(int columnIndex);
+
+    /**
+     * Get a DATE field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @return the date value, or null if the field is null
+     */
+    LocalDate getDate(int columnIndex);
+
+    /**
+     * Get a TIME field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @return the time value, or null if the field is null
+     */
+    LocalTime getTime(int columnIndex);
+
+    /**
+     * Get a TIMESTAMP field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @return the timestamp value, or null if the field is null
+     */
+    Instant getTimestamp(int columnIndex);
+
+    /**
+     * Get a DECIMAL field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @return the decimal value, or null if the field is null
+     */
+    BigDecimal getDecimal(int columnIndex);
+
+    /**
+     * Get a UUID field value by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     *
+     * @return the UUID value, or null if the field is null
+     */
+    UUID getUuid(int columnIndex);
 
     // ==================== Nested Type Accessors ====================
 
@@ -201,6 +301,12 @@ public interface RowReader extends AutoCloseable {
      * Check if a field is null by name.
      */
     boolean isNull(String name);
+
+    /**
+     * Check if a field is null by column index.
+     * Faster than name-based access as it avoids the name lookup.
+     */
+    boolean isNull(int columnIndex);
 
     /**
      * Get the number of fields in the current row.
