@@ -8,26 +8,15 @@
 package dev.morling.hardwood.reader;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.channels.FileChannel;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 import dev.morling.hardwood.internal.reader.BatchDataView;
 import dev.morling.hardwood.internal.reader.ColumnValueIterator;
 import dev.morling.hardwood.internal.reader.CrossFilePrefetchCoordinator;
+import dev.morling.hardwood.internal.reader.FileState;
 import dev.morling.hardwood.internal.reader.PageCursor;
-import dev.morling.hardwood.internal.reader.PageInfo;
-import dev.morling.hardwood.internal.reader.PageScanner;
-import dev.morling.hardwood.internal.reader.ParquetMetadataReader;
 import dev.morling.hardwood.internal.reader.TypedColumnData;
-import dev.morling.hardwood.metadata.ColumnChunk;
-import dev.morling.hardwood.metadata.FileMetaData;
-import dev.morling.hardwood.metadata.RowGroup;
-import dev.morling.hardwood.schema.ColumnSchema;
 import dev.morling.hardwood.schema.FileSchema;
 import dev.morling.hardwood.schema.ProjectedSchema;
 
@@ -59,10 +48,7 @@ public class MultiFileRowReader extends AbstractRowReader {
     private final ProjectedSchema projectedSchema;
     private final HardwoodContext context;
     private final CrossFilePrefetchCoordinator coordinator;
-
-    // First file state
-    private final FileChannel firstFileChannel;
-    private final List<RowGroup> firstFileRowGroups;
+    private final FileState firstFileState;
 
     // Iterators for each projected column
     private ColumnValueIterator[] iterators;
@@ -82,36 +68,19 @@ public class MultiFileRowReader extends AbstractRowReader {
 
         this.context = context;
 
-        // Open first file and get schema
-        Path firstPath = files.get(0);
-        this.firstFileChannel = FileChannel.open(firstPath, StandardOpenOption.READ);
+        // Create coordinator for all files
+        this.coordinator = new CrossFilePrefetchCoordinator(files, context);
 
-        try {
-            // Read metadata directly from the opened channel (avoids opening file twice)
-            FileMetaData fileMetaData = ParquetMetadataReader.readMetadata(firstFileChannel, firstPath);
-            this.schema = FileSchema.fromSchemaElements(fileMetaData.schema());
-            this.firstFileRowGroups = fileMetaData.rowGroups();
+        // Phase 1: Open first file and get schema (keeps channel open)
+        this.schema = coordinator.openFirstFile();
+        this.projectedSchema = ProjectedSchema.create(schema, projection);
 
-            this.projectedSchema = ProjectedSchema.create(schema, projection);
+        // Phase 2: Scan pages using already-open channel
+        this.firstFileState = coordinator.prepareFirstFile(projectedSchema);
 
-            // Create coordinator for remaining files
-            List<Path> remainingFiles = files.size() > 1 ? new ArrayList<>(files.subList(1, files.size())) : List.of();
-            this.coordinator = new CrossFilePrefetchCoordinator(
-                    remainingFiles, context, projectedSchema, schema);
-
-            LOG.log(System.Logger.Level.DEBUG,
-                    "MultiFileRowReader created for {0} files, {1} projected columns",
-                    files.size(), projectedSchema.getProjectedColumnCount());
-        }
-        catch (Exception e) {
-            try {
-                firstFileChannel.close();
-            }
-            catch (IOException closeEx) {
-                e.addSuppressed(closeEx);
-            }
-            throw e;
-        }
+        LOG.log(System.Logger.Level.DEBUG,
+                "MultiFileRowReader created for {0} files, {1} projected columns",
+                files.size(), projectedSchema.getProjectedColumnCount());
     }
 
     @Override
@@ -122,14 +91,13 @@ public class MultiFileRowReader extends AbstractRowReader {
         initialized = true;
 
         int projectedColumnCount = projectedSchema.getProjectedColumnCount();
-        List<List<PageInfo>> pageInfosByColumn = scanFirstFilePages();
 
-        // Create iterators with cross-file prefetching
+        // Create iterators using pages from the first file
         iterators = new ColumnValueIterator[projectedColumnCount];
         for (int i = 0; i < projectedColumnCount; i++) {
             int originalIndex = projectedSchema.toOriginalIndex(i);
             PageCursor pageCursor = new PageCursor(
-                    pageInfosByColumn.get(i), context, coordinator, i);
+                    firstFileState.pageInfosByColumn().get(i), context, coordinator, i);
             iterators[i] = new ColumnValueIterator(pageCursor, schema.getColumn(originalIndex), schema.isFlatSchema());
         }
 
@@ -138,43 +106,6 @@ public class MultiFileRowReader extends AbstractRowReader {
 
         // Load first batch
         loadNextBatch();
-    }
-
-    private List<List<PageInfo>> scanFirstFilePages() {
-        int projectedColumnCount = projectedSchema.getProjectedColumnCount();
-
-        // Scan pages for each projected column in parallel
-        @SuppressWarnings("unchecked")
-        CompletableFuture<List<PageInfo>>[] scanFutures = new CompletableFuture[projectedColumnCount];
-
-        for (int projectedIndex = 0; projectedIndex < projectedColumnCount; projectedIndex++) {
-            final int projIdx = projectedIndex;
-            final int originalIndex = projectedSchema.toOriginalIndex(projectedIndex);
-            final ColumnSchema columnSchema = schema.getColumn(originalIndex);
-
-            scanFutures[projIdx] = CompletableFuture.supplyAsync(() -> {
-                List<PageInfo> columnPages = new ArrayList<>();
-                for (RowGroup rowGroup : firstFileRowGroups) {
-                    ColumnChunk columnChunk = rowGroup.columns().get(originalIndex);
-                    PageScanner scanner = new PageScanner(firstFileChannel, columnSchema, columnChunk, context);
-                    try {
-                        columnPages.addAll(scanner.scanPages());
-                    }
-                    catch (IOException e) {
-                        throw new UncheckedIOException("Failed to scan pages for column " + columnSchema.name(), e);
-                    }
-                }
-                return columnPages;
-            }, context.executor());
-        }
-
-        CompletableFuture.allOf(scanFutures).join();
-
-        List<List<PageInfo>> result = new ArrayList<>(projectedColumnCount);
-        for (int i = 0; i < projectedColumnCount; i++) {
-            result.add(scanFutures[i].join());
-        }
-        return result;
     }
 
     @Override
@@ -236,11 +167,5 @@ public class MultiFileRowReader extends AbstractRowReader {
     public void close() {
         closed = true;
         coordinator.closeChannels();
-        try {
-            firstFileChannel.close();
-        }
-        catch (IOException e) {
-            LOG.log(System.Logger.Level.WARNING, "Failed to close first file channel", e);
-        }
     }
 }

@@ -14,6 +14,7 @@ import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 
 import dev.morling.hardwood.internal.thrift.FileMetaDataReader;
@@ -35,6 +36,19 @@ public final class ParquetMetadataReader {
 
     private ParquetMetadataReader() {
         // Utility class
+    }
+
+    /**
+     * Reads file metadata from a Parquet file, opening and closing the file.
+     *
+     * @param path the file path to read
+     * @return the parsed FileMetaData
+     * @throws IOException if the file is not a valid Parquet file or cannot be read
+     */
+    public static FileMetaData readMetadata(Path path) throws IOException {
+        try (FileChannel channel = FileChannel.open(path, StandardOpenOption.READ)) {
+            return readMetadata(channel, path);
+        }
     }
 
     /**

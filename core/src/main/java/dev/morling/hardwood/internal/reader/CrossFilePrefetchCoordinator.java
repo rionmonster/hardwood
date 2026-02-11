@@ -28,58 +28,137 @@ import dev.morling.hardwood.schema.FileSchema;
 import dev.morling.hardwood.schema.ProjectedSchema;
 
 /**
- * Coordinates cross-file prefetching by preparing next file's pages before current file is exhausted.
+ * Coordinates file preparation and cross-file prefetching for multi-file reading.
  * <p>
- * When a PageCursor detects its queue isn't full and current file pages are exhausted,
- * it requests pages from this coordinator. The coordinator:
+ * This coordinator handles all files including the first one. It:
  * <ul>
- *   <li>Triggers async file preparation (metadata read + page scanning) on first column request</li>
- *   <li>Returns pre-scanned pages for the requested column</li>
- *   <li>Tracks which columns have consumed pages from the current prepared file</li>
+ *   <li>Prepares the first file synchronously to establish the reference schema</li>
+ *   <li>Prefetches subsequent files asynchronously before they're needed</li>
+ *   <li>Validates schema compatibility across files</li>
+ *   <li>Manages file channel lifecycle</li>
  * </ul>
  * </p>
  * <p>
- * Thread safety: Multiple columns may request simultaneously. File preparation happens once
- * per file transition, using {@link CompletableFuture} for async coordination.
+ * Thread safety: Multiple columns may request pages simultaneously. File preparation
+ * happens once per file transition, using {@link CompletableFuture} for async coordination.
  * </p>
  */
 public class CrossFilePrefetchCoordinator {
 
     private static final System.Logger LOG = System.getLogger(CrossFilePrefetchCoordinator.class.getName());
 
-    private final List<Path> remainingFiles;
     private final HardwoodContext context;
-    private final ProjectedSchema projectedSchema;
-    private final FileSchema referenceSchema;
+    private final List<Path> remainingFiles;
 
-    // Synchronization for file preparation
+    // Set after first file is opened
+    private ProjectedSchema projectedSchema;
+    private FileSchema referenceSchema;
+    private FileChannel firstFileChannel;
+    private FileMetaData firstFileMetaData;
+    private Path firstFilePath;
+
+    // First file state (prepared after scanning)
+    private FileState firstFileState;
+
+    // Synchronization for subsequent file preparation
     private final Object preparationLock = new Object();
     private final AtomicBoolean preparationTriggered = new AtomicBoolean(false);
     private CompletableFuture<FileState> nextFileStateFuture;
     private FileState currentPreparedState;
 
     // Track which columns have consumed pages from current prepared file
-    private final boolean[] columnsConsumed;
+    private boolean[] columnsConsumed;
     private int columnsConsumedCount = 0;
 
     // Channels to close after all pages consumed
     private final List<FileChannel> channelsToClose = new ArrayList<>();
 
     /**
-     * Creates a coordinator for the remaining files after the first file.
+     * Creates a coordinator for all files.
      *
-     * @param remainingFiles files to prepare (excluding the already-opened first file)
+     * @param files all files to read (must not be empty)
      * @param context the hardwood context with executor and decompressor
-     * @param projectedSchema the projected schema for column mapping
-     * @param referenceSchema the schema from the first file for validation
      */
-    public CrossFilePrefetchCoordinator(List<Path> remainingFiles, HardwoodContext context,
-                                        ProjectedSchema projectedSchema, FileSchema referenceSchema) {
-        this.remainingFiles = new ArrayList<>(remainingFiles);
+    public CrossFilePrefetchCoordinator(List<Path> files, HardwoodContext context) {
+        if (files.isEmpty()) {
+            throw new IllegalArgumentException("At least one file must be provided");
+        }
+        this.remainingFiles = new ArrayList<>(files);
         this.context = context;
+    }
+
+    /**
+     * Opens the first file and returns its schema.
+     * <p>
+     * This is phase 1 of initialization. Call this first to get the schema,
+     * then create a ProjectedSchema, then call {@link #prepareFirstFile(ProjectedSchema)}.
+     * </p>
+     *
+     * @return the schema from the first file
+     * @throws IOException if the first file cannot be read
+     */
+    public FileSchema openFirstFile() throws IOException {
+        firstFilePath = remainingFiles.remove(0);
+        firstFileChannel = FileChannel.open(firstFilePath, StandardOpenOption.READ);
+
+        try {
+            firstFileMetaData = ParquetMetadataReader.readMetadata(firstFileChannel, firstFilePath);
+            referenceSchema = FileSchema.fromSchemaElements(firstFileMetaData.schema());
+            return referenceSchema;
+        }
+        catch (Exception e) {
+            try {
+                firstFileChannel.close();
+            }
+            catch (IOException closeEx) {
+                e.addSuppressed(closeEx);
+            }
+            firstFileChannel = null;
+            throw e;
+        }
+    }
+
+    /**
+     * Scans pages for the first file after schema is established.
+     * <p>
+     * This is phase 2 of initialization. Must be called after {@link #openFirstFile()}.
+     * </p>
+     *
+     * @param projectedSchema the projected schema (created from first file's schema)
+     * @return the first file's state including channel, metadata, and scanned pages
+     */
+    public FileState prepareFirstFile(ProjectedSchema projectedSchema) {
+        if (firstFileChannel == null) {
+            throw new IllegalStateException("openFirstFile() must be called first");
+        }
+
         this.projectedSchema = projectedSchema;
-        this.referenceSchema = referenceSchema;
         this.columnsConsumed = new boolean[projectedSchema.getProjectedColumnCount()];
+
+        // Scan pages for the first file (channel already open, metadata already read)
+        List<List<PageInfo>> pageInfosByColumn = scanAllProjectedColumns(
+                firstFileChannel, firstFileMetaData, referenceSchema, true);
+
+        firstFileState = new FileState(firstFilePath, firstFileChannel, firstFileMetaData,
+                referenceSchema, pageInfosByColumn);
+
+        LOG.log(System.Logger.Level.DEBUG,
+                "First file prepared: {0}, {1} projected columns",
+                firstFilePath, projectedSchema.getProjectedColumnCount());
+
+        // Pre-trigger preparation of next file if available
+        triggerNextFilePrefetch();
+
+        return firstFileState;
+    }
+
+    /**
+     * Returns the reference schema established from the first file.
+     *
+     * @return the reference file schema
+     */
+    public FileSchema getReferenceSchema() {
+        return referenceSchema;
     }
 
     /**
@@ -196,13 +275,22 @@ public class CrossFilePrefetchCoordinator {
         columnsConsumedCount = 0;
 
         // Pre-trigger preparation of next file if available
-        if (!remainingFiles.isEmpty()) {
-            Path nextPath = remainingFiles.get(0);
-            LOG.log(System.Logger.Level.DEBUG,
-                    "Pre-triggering preparation of next file: {0}", nextPath);
-            preparationTriggered.set(true);
-            nextFileStateFuture = CompletableFuture.supplyAsync(
-                    () -> prepareFile(nextPath), context.executor());
+        triggerNextFilePrefetch();
+    }
+
+    /**
+     * Triggers prefetch of the next file if available.
+     */
+    private void triggerNextFilePrefetch() {
+        synchronized (preparationLock) {
+            if (!remainingFiles.isEmpty() && !preparationTriggered.get()) {
+                Path nextPath = remainingFiles.get(0);
+                LOG.log(System.Logger.Level.DEBUG,
+                        "Pre-triggering preparation of next file: {0}", nextPath);
+                preparationTriggered.set(true);
+                nextFileStateFuture = CompletableFuture.supplyAsync(
+                        () -> prepareFile(nextPath), context.executor());
+            }
         }
     }
 
@@ -220,7 +308,8 @@ public class CrossFilePrefetchCoordinator {
                 validateSchemaCompatibility(path, fileSchema);
 
                 // Scan pages for each projected column
-                List<List<PageInfo>> pageInfosByColumn = scanAllProjectedColumns(channel, fileMetaData, fileSchema);
+                List<List<PageInfo>> pageInfosByColumn = scanAllProjectedColumns(
+                        channel, fileMetaData, fileSchema, false);
 
                 return new FileState(path, channel, fileMetaData, fileSchema, pageInfosByColumn);
             }
@@ -271,9 +360,15 @@ public class CrossFilePrefetchCoordinator {
 
     /**
      * Scans pages for all projected columns.
+     *
+     * @param channel the file channel
+     * @param fileMetaData the file metadata
+     * @param fileSchema the file schema
+     * @param isFirstFile true if this is the first file (uses direct index mapping)
+     * @return list of page info lists, one per projected column
      */
     private List<List<PageInfo>> scanAllProjectedColumns(FileChannel channel, FileMetaData fileMetaData,
-                                                         FileSchema fileSchema) {
+                                                         FileSchema fileSchema, boolean isFirstFile) {
         int projectedColumnCount = projectedSchema.getProjectedColumnCount();
         List<RowGroup> rowGroups = fileMetaData.rowGroups();
 
@@ -283,23 +378,31 @@ public class CrossFilePrefetchCoordinator {
         for (int projectedIndex = 0; projectedIndex < projectedColumnCount; projectedIndex++) {
             final int projIdx = projectedIndex;
             final int originalIndex = projectedSchema.toOriginalIndex(projectedIndex);
-            final ColumnSchema refColumn = referenceSchema.getColumn(originalIndex);
 
-            // Find the column index in this file (may differ if schema order varies)
-            final ColumnSchema fileColumn = fileSchema.getColumn(refColumn.name());
-            final int fileColumnIndex = fileColumn.columnIndex();
+            // For first file, use direct index; for subsequent files, look up by name
+            final ColumnSchema columnSchema;
+            final int columnIndex;
+            if (isFirstFile) {
+                columnSchema = fileSchema.getColumn(originalIndex);
+                columnIndex = originalIndex;
+            }
+            else {
+                ColumnSchema refColumn = referenceSchema.getColumn(originalIndex);
+                columnSchema = fileSchema.getColumn(refColumn.name());
+                columnIndex = columnSchema.columnIndex();
+            }
 
             scanFutures[projIdx] = CompletableFuture.supplyAsync(() -> {
                 List<PageInfo> columnPages = new ArrayList<>();
                 for (RowGroup rowGroup : rowGroups) {
-                    ColumnChunk columnChunk = rowGroup.columns().get(fileColumnIndex);
-                    PageScanner scanner = new PageScanner(channel, fileColumn, columnChunk, context);
+                    ColumnChunk columnChunk = rowGroup.columns().get(columnIndex);
+                    PageScanner scanner = new PageScanner(channel, columnSchema, columnChunk, context);
                     try {
                         columnPages.addAll(scanner.scanPages());
                     }
                     catch (IOException e) {
                         throw new UncheckedIOException(
-                                "Failed to scan pages for column " + fileColumn.name(), e);
+                                "Failed to scan pages for column " + columnSchema.name(), e);
                     }
                 }
                 return columnPages;
@@ -321,6 +424,17 @@ public class CrossFilePrefetchCoordinator {
      * Should be called when the MultiFileRowReader is closed.
      */
     public void closeChannels() {
+        // Close first file channel
+        if (firstFileState != null) {
+            try {
+                firstFileState.channel().close();
+            }
+            catch (IOException e) {
+                LOG.log(System.Logger.Level.WARNING, "Failed to close first file channel", e);
+            }
+        }
+
+        // Close accumulated channels from consumed files
         for (FileChannel channel : channelsToClose) {
             try {
                 channel.close();
