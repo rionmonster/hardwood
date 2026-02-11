@@ -22,6 +22,7 @@ import dev.morling.hardwood.internal.reader.CrossFilePrefetchCoordinator;
 import dev.morling.hardwood.internal.reader.PageCursor;
 import dev.morling.hardwood.internal.reader.PageInfo;
 import dev.morling.hardwood.internal.reader.PageScanner;
+import dev.morling.hardwood.internal.reader.ParquetMetadataReader;
 import dev.morling.hardwood.internal.reader.TypedColumnData;
 import dev.morling.hardwood.metadata.ColumnChunk;
 import dev.morling.hardwood.metadata.FileMetaData;
@@ -86,12 +87,10 @@ public class MultiFileRowReader extends AbstractRowReader {
         this.firstFileChannel = FileChannel.open(firstPath, StandardOpenOption.READ);
 
         try {
-            // Read metadata using ParquetFileReader
-            try (ParquetFileReader firstReader = ParquetFileReader.open(firstPath)) {
-                FileMetaData fileMetaData = firstReader.getFileMetaData();
-                this.schema = firstReader.getFileSchema();
-                this.firstFileRowGroups = fileMetaData.rowGroups();
-            }
+            // Read metadata directly from the opened channel (avoids opening file twice)
+            FileMetaData fileMetaData = ParquetMetadataReader.readMetadata(firstFileChannel, firstPath);
+            this.schema = FileSchema.fromSchemaElements(fileMetaData.schema());
+            this.firstFileRowGroups = fileMetaData.rowGroups();
 
             this.projectedSchema = ProjectedSchema.create(schema, projection);
 

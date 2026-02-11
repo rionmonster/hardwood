@@ -96,10 +96,13 @@ class SimplePerformanceTest {
     record Result(long passengerCount, double tripDistance, double fareAmount, long durationMs, long rowCount) {
     }
 
+    record SchemaGroup(List<Path> files, boolean passengerCountIsLong) {
+    }
+
     private Set<Contender> getEnabledContenders() {
         String property = System.getProperty(CONTENDERS_PROPERTY);
         if (property == null || property.isBlank()) {
-            return EnumSet.of(Contender.HARDWOOD_INDEXED);
+            return EnumSet.of(Contender.HARDWOOD_MULTIFILE);
         }
         if (property.equalsIgnoreCase("all")) {
             return EnumSet.allOf(Contender.class);
@@ -396,27 +399,15 @@ class SimplePerformanceTest {
                 "passenger_count", "trip_distance", "fare_amount");
 
         // Group files by passenger_count type for schema compatibility
-        List<List<Path>> fileGroups = groupFilesBySchema(files);
+        // SchemaGroup includes type info, avoiding need to re-probe files
+        List<SchemaGroup> schemaGroups = groupFilesBySchema(files);
 
         try (Hardwood hardwood = Hardwood.create()) {
-            for (List<Path> group : fileGroups) {
-                if (group.isEmpty()) {
-                    continue;
-                }
-
-                // Determine passenger_count type from first file in group
-                boolean pcIsLong;
-                try (ParquetFileReader probe = hardwood.open(group.get(0))) {
-                    SchemaNode pcNode = probe.getFileSchema().getField("passenger_count");
-                    pcIsLong = pcNode instanceof SchemaNode.PrimitiveNode pn
-                            && pn.type() == PhysicalType.INT64;
-                }
-                catch (IOException e) {
-                    throw new RuntimeException("Failed to probe file: " + group.get(0), e);
-                }
+            for (SchemaGroup group : schemaGroups) {
+                boolean pcIsLong = group.passengerCountIsLong();
 
                 // Process all files in this group with cross-file prefetching
-                try (MultiFileRowReader rowReader = hardwood.openAll(group, projection)) {
+                try (MultiFileRowReader rowReader = hardwood.openAll(group.files(), projection)) {
                     while (rowReader.hasNext()) {
                         rowReader.next();
                         rowCount++;
@@ -450,8 +441,10 @@ class SimplePerformanceTest {
     /**
      * Groups files by schema compatibility (based on passenger_count physical type).
      * Files with compatible schemas are grouped together for cross-file prefetching.
+     * Returns SchemaGroup records that include both the files and the type information,
+     * avoiding the need to re-probe files later.
      */
-    private List<List<Path>> groupFilesBySchema(List<Path> files) {
+    private List<SchemaGroup> groupFilesBySchema(List<Path> files) {
         List<Path> longTypeFiles = new ArrayList<>();
         List<Path> doubleTypeFiles = new ArrayList<>();
 
@@ -472,12 +465,12 @@ class SimplePerformanceTest {
             }
         }
 
-        List<List<Path>> groups = new ArrayList<>();
+        List<SchemaGroup> groups = new ArrayList<>();
         if (!longTypeFiles.isEmpty()) {
-            groups.add(longTypeFiles);
+            groups.add(new SchemaGroup(longTypeFiles, true));
         }
         if (!doubleTypeFiles.isEmpty()) {
-            groups.add(doubleTypeFiles);
+            groups.add(new SchemaGroup(doubleTypeFiles, false));
         }
         return groups;
     }

@@ -7,18 +7,12 @@
  */
 package dev.morling.hardwood.reader;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.Arrays;
 
-import dev.morling.hardwood.internal.thrift.FileMetaDataReader;
-import dev.morling.hardwood.internal.thrift.ThriftCompactReader;
+import dev.morling.hardwood.internal.reader.ParquetMetadataReader;
 import dev.morling.hardwood.metadata.ColumnChunk;
 import dev.morling.hardwood.metadata.FileMetaData;
 import dev.morling.hardwood.schema.ColumnSchema;
@@ -39,10 +33,6 @@ import dev.morling.hardwood.schema.ProjectedSchema;
  * <p>For multi-file usage with shared thread pool, use {@link Hardwood}.</p>
  */
 public class ParquetFileReader implements AutoCloseable {
-
-    private static final byte[] MAGIC = "PAR1".getBytes(StandardCharsets.UTF_8);
-    private static final int FOOTER_LENGTH_SIZE = 4;
-    private static final int MAGIC_SIZE = 4;
 
     private final Path path;
     private final FileChannel channel;
@@ -80,45 +70,7 @@ public class ParquetFileReader implements AutoCloseable {
                                           boolean ownsContext) throws IOException {
         FileChannel channel = FileChannel.open(path, StandardOpenOption.READ);
         try {
-            // Validate file size
-            long fileSize = channel.size();
-            if (fileSize < MAGIC_SIZE + MAGIC_SIZE + FOOTER_LENGTH_SIZE) {
-                throw new IOException("File too small to be a valid Parquet file");
-            }
-
-            // Read and validate magic number at start
-            ByteBuffer startMagicBuf = ByteBuffer.allocate(MAGIC_SIZE);
-            readFully(channel, startMagicBuf, 0);
-            if (!Arrays.equals(startMagicBuf.array(), MAGIC)) {
-                throw new IOException("Not a Parquet file (invalid magic number at start)");
-            }
-
-            // Read footer size and magic number at end
-            long footerInfoPos = fileSize - MAGIC_SIZE - FOOTER_LENGTH_SIZE;
-            ByteBuffer footerInfoBuf = ByteBuffer.allocate(FOOTER_LENGTH_SIZE + MAGIC_SIZE);
-            readFully(channel, footerInfoBuf, footerInfoPos);
-            footerInfoBuf.order(ByteOrder.LITTLE_ENDIAN);
-            int footerLength = footerInfoBuf.getInt();
-            byte[] endMagic = new byte[MAGIC_SIZE];
-            footerInfoBuf.get(endMagic);
-            if (!Arrays.equals(endMagic, MAGIC)) {
-                throw new IOException("Not a Parquet file (invalid magic number at end)");
-            }
-
-            // Validate footer length
-            long footerStart = fileSize - MAGIC_SIZE - FOOTER_LENGTH_SIZE - footerLength;
-            if (footerStart < MAGIC_SIZE) {
-                throw new IOException("Invalid footer length: " + footerLength);
-            }
-
-            // Read footer
-            ByteBuffer footerBuf = ByteBuffer.allocate(footerLength);
-            readFully(channel, footerBuf, footerStart);
-
-            // Parse file metadata
-            ThriftCompactReader reader = new ThriftCompactReader(new ByteArrayInputStream(footerBuf.array()));
-            FileMetaData fileMetaData = FileMetaDataReader.read(reader);
-
+            FileMetaData fileMetaData = ParquetMetadataReader.readMetadata(channel, path);
             return new ParquetFileReader(path, channel, fileMetaData, context, ownsContext);
         }
         catch (Exception e) {
@@ -131,19 +83,6 @@ public class ParquetFileReader implements AutoCloseable {
             }
             throw e;
         }
-    }
-
-    /**
-     * Read from channel at position until buffer is full.
-     */
-    private static void readFully(FileChannel channel, ByteBuffer buffer, long position) throws IOException {
-        while (buffer.hasRemaining()) {
-            int read = channel.read(buffer, position + buffer.position());
-            if (read < 0) {
-                throw new IOException("Unexpected end of file");
-            }
-        }
-        buffer.flip();
     }
 
     public FileMetaData getFileMetaData() {
