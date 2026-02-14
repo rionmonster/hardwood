@@ -34,16 +34,15 @@ public class PageCursor {
 
     private static final System.Logger LOG = System.getLogger(PageCursor.class.getName());
 
-    private static final int INITIAL_PREFETCH_DEPTH = 2;
+    private static final int INITIAL_PREFETCH_DEPTH = 4;
     private static final int MAX_PREFETCH_DEPTH = 8;
-    private static final int HITS_TO_DECREASE = 20;
-    private static final int MISSES_TO_INCREASE = 1;
 
     private final ArrayList<PageInfo> pageInfos;
     private final HardwoodContext context;
     private final Executor executor;
     private final String columnName;
     private final int projectedColumnIndex;
+    private final String initialFileName;
     private PageReader pageReader;
     private int nextPageIndex = 0;
 
@@ -56,14 +55,12 @@ public class PageCursor {
     // Adaptive prefetch queue
     private final Deque<CompletableFuture<Page>> prefetchQueue = new ArrayDeque<>();
     private int targetPrefetchDepth = INITIAL_PREFETCH_DEPTH;
-    private int hitCount = 0;
-    private int missCount = 0;
 
     /**
      * Creates a PageCursor for single-file reading.
      */
     public PageCursor(List<PageInfo> pageInfos, HardwoodContext context) {
-        this(pageInfos, context, null, -1);
+        this(pageInfos, context, null, -1, null);
     }
 
     /**
@@ -73,14 +70,16 @@ public class PageCursor {
      * @param context hardwood context with executor
      * @param fileManager file manager for fetching pages from subsequent files (may be null)
      * @param projectedColumnIndex the projected column index for multi-file page requests
+     * @param initialFileName the initial file name for logging (may be null)
      */
     public PageCursor(List<PageInfo> pageInfos, HardwoodContext context,
-                      FileManager fileManager, int projectedColumnIndex) {
+                      FileManager fileManager, int projectedColumnIndex, String initialFileName) {
         this.pageInfos = new ArrayList<>(pageInfos);
         this.context = context;
         this.executor = context.executor();
         this.fileManager = fileManager;
         this.projectedColumnIndex = projectedColumnIndex;
+        this.initialFileName = initialFileName;
         this.currentFileEndIndex = pageInfos.size();
 
         if (pageInfos.isEmpty()) {
@@ -138,7 +137,8 @@ public class PageCursor {
             }
             else {
                 // Queue empty but pages remain - decode synchronously and increase depth
-                LOG.log(System.Logger.Level.DEBUG, "Prefetch queue empty for column ''{0}''", columnName);
+                LOG.log(System.Logger.Level.DEBUG, "[{0}] Prefetch queue empty for column ''{1}''",
+                        getCurrentFileName(), columnName);
                 targetPrefetchDepth = Math.min(targetPrefetchDepth + 1, MAX_PREFETCH_DEPTH);
                 int pageIndex = nextPageIndex++;
                 Page page = decodePage(pageInfos.get(pageIndex));
@@ -149,27 +149,11 @@ public class PageCursor {
 
         CompletableFuture<Page> future = prefetchQueue.pollFirst();
 
-        if (future.isDone()) {
-            // Hit: prefetch was ready
-            hitCount++;
-            missCount = 0;
-            if (hitCount >= HITS_TO_DECREASE && targetPrefetchDepth > INITIAL_PREFETCH_DEPTH) {
-                targetPrefetchDepth--;
-                hitCount = 0;
-            }
-        }
-        else {
-            // Miss: had to wait
-            LOG.log(System.Logger.Level.DEBUG, "Prefetch miss for column ''{0}'', depth={1}",
-                    columnName, targetPrefetchDepth);
-            missCount++;
-            hitCount = 0;
-            if (missCount >= MISSES_TO_INCREASE) {
-                targetPrefetchDepth = Math.min(targetPrefetchDepth + 1, MAX_PREFETCH_DEPTH);
-                LOG.log(System.Logger.Level.DEBUG, "Increasing prefetch depth for column ''{0}'' to {1}",
-                        columnName, targetPrefetchDepth);
-                missCount = 0;
-            }
+        // Miss: had to wait - increase prefetch depth
+        if (!future.isDone() && targetPrefetchDepth < MAX_PREFETCH_DEPTH) {
+            targetPrefetchDepth++;
+            LOG.log(System.Logger.Level.DEBUG, "[{0}] Prefetch miss for column ''{1}'', increasing depth to {2}",
+                    getCurrentFileName(), columnName, targetPrefetchDepth);
         }
 
         // Refill queue after consuming
@@ -207,8 +191,8 @@ public class PageCursor {
                 List<PageInfo> nextFilePages = fileManager.getPages(currentFileIndex + 1, projectedColumnIndex);
                 if (nextFilePages != null && !nextFilePages.isEmpty()) {
                     LOG.log(System.Logger.Level.DEBUG,
-                            "Fetching pages from file {0} for column ''{1}'', adding {2} pages",
-                            currentFileIndex + 1, columnName, nextFilePages.size());
+                            "[{0}] Fetching pages for column ''{1}'', adding {2} pages",
+                            fileManager.getFileName(currentFileIndex + 1), columnName, nextFilePages.size());
 
                     // Create PageReader for the new file (don't update this.pageReader yet)
                     PageInfo firstNewPage = nextFilePages.get(0);
@@ -240,8 +224,8 @@ public class PageCursor {
                 currentFileIndex++;
                 currentFileEndIndex = pageInfos.size(); // Update boundary for potential next file
                 LOG.log(System.Logger.Level.DEBUG,
-                        "Switched to file {0} reader for column ''{1}''",
-                        currentFileIndex, columnName);
+                        "[{0}] Switched to new file reader for column ''{1}''",
+                        fileManager.getFileName(currentFileIndex), columnName);
             }
 
             int pageIndex = nextPageIndex++;
@@ -271,8 +255,8 @@ public class PageCursor {
         }
 
         LOG.log(System.Logger.Level.DEBUG,
-                "Blocking on next file {0} for column ''{1}''",
-                currentFileIndex + 1, columnName);
+                "[{0}] Blocking on file load for column ''{1}''",
+                fileManager.getFileName(currentFileIndex + 1), columnName);
 
         // Block on getting pages from next file
         List<PageInfo> nextFilePages = fileManager.getPages(currentFileIndex + 1, projectedColumnIndex);
@@ -296,10 +280,23 @@ public class PageCursor {
         pageInfos.addAll(nextFilePages);
 
         LOG.log(System.Logger.Level.DEBUG,
-                "Loaded {0} pages from file {1} for column ''{2}''",
-                nextFilePages.size(), currentFileIndex + 1, columnName);
+                "[{0}] Loaded {1} pages for column ''{2}''",
+                fileManager.getFileName(currentFileIndex + 1), nextFilePages.size(), columnName);
 
         return true;
+    }
+
+    /**
+     * Gets the current file name for logging purposes.
+     */
+    private String getCurrentFileName() {
+        if (fileManager != null) {
+            String fileName = fileManager.getFileName(currentFileIndex);
+            if (fileName != null) {
+                return fileName;
+            }
+        }
+        return initialFileName != null ? initialFileName : "unknown";
     }
 
     /**

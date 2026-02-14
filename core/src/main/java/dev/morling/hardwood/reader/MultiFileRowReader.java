@@ -42,6 +42,8 @@ import dev.morling.hardwood.schema.ProjectedSchema;
  */
 public class MultiFileRowReader extends AbstractRowReader {
 
+    private static final System.Logger LOG = System.getLogger(MultiFileRowReader.class.getName());
+
     private final FileSchema schema;
     private final ProjectedSchema projectedSchema;
     private final HardwoodContext context;
@@ -71,6 +73,9 @@ public class MultiFileRowReader extends AbstractRowReader {
         this.schema = initResult.schema();
         this.projectedSchema = initResult.projectedSchema();
         this.adaptiveBatchSize = computeOptimalBatchSize(projectedSchema);
+
+        LOG.log(System.Logger.Level.DEBUG, "Created MultiFileRowReader for {0} files starting with {1}, {2} projected columns",
+                files.size(), files.get(0).getFileName(), projectedSchema.getProjectedColumnCount());
     }
 
     @Override
@@ -83,11 +88,12 @@ public class MultiFileRowReader extends AbstractRowReader {
         int projectedColumnCount = projectedSchema.getProjectedColumnCount();
 
         // Create iterators using pages from the first file
+        String firstFileName = initResult.firstFileState().path().getFileName().toString();
         iterators = new ColumnValueIterator[projectedColumnCount];
         for (int i = 0; i < projectedColumnCount; i++) {
             int originalIndex = projectedSchema.toOriginalIndex(i);
             PageCursor pageCursor = new PageCursor(
-                    initResult.firstFileState().pageInfosByColumn().get(i), context, fileManager, i);
+                    initResult.firstFileState().pageInfosByColumn().get(i), context, fileManager, i, firstFileName);
             iterators[i] = new ColumnValueIterator(pageCursor, schema.getColumn(originalIndex), schema.isFlatSchema());
         }
 

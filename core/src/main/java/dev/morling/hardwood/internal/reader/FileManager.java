@@ -121,6 +121,19 @@ public class FileManager {
     }
 
     /**
+     * Gets the file name (without path) for the given index.
+     *
+     * @param fileIndex the file index
+     * @return the file name, or null if index is out of bounds
+     */
+    public String getFileName(int fileIndex) {
+        if (!hasFile(fileIndex)) {
+            return null;
+        }
+        return files.get(fileIndex).getFileName().toString();
+    }
+
+    /**
      * Checks if a file is ready (fully loaded) without blocking.
      *
      * @param fileIndex the file index
