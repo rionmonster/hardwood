@@ -53,9 +53,11 @@ class SimplePerformanceTest {
     private static final Path DATA_DIR = Path.of("../test-data-setup/target/tlc-trip-record-data");
     private static final YearMonth DEFAULT_START = YearMonth.of(2016, 1);
     private static final YearMonth DEFAULT_END = YearMonth.of(2025, 11);
+    private static final int DEFAULT_RUNS = 10;
     private static final String CONTENDERS_PROPERTY = "perf.contenders";
     private static final String START_PROPERTY = "perf.start";
     private static final String END_PROPERTY = "perf.end";
+    private static final String RUNS_PROPERTY = "perf.runs";
 
     enum Contender {
         HARDWOOD_INDEXED("Hardwood (indexed)"),
@@ -131,6 +133,14 @@ class SimplePerformanceTest {
         return requested.isAfter(DEFAULT_END) ? DEFAULT_END : requested;
     }
 
+    private int getRunCount() {
+        String property = System.getProperty(RUNS_PROPERTY);
+        if (property == null || property.isBlank()) {
+            return DEFAULT_RUNS;
+        }
+        return Integer.parseInt(property);
+    }
+
     private List<Path> getAvailableFiles() throws IOException {
         List<Path> files = new ArrayList<>();
         YearMonth start = getStartMonth();
@@ -153,8 +163,11 @@ class SimplePerformanceTest {
         Set<Contender> enabledContenders = getEnabledContenders();
         assertThat(enabledContenders).as("At least one contender must be enabled").isNotEmpty();
 
+        int runCount = getRunCount();
+
         System.out.println("\n=== Performance Test ===");
         System.out.println("Files available: " + files.size());
+        System.out.println("Runs per contender: " + runCount);
         System.out.println("Enabled contenders: " + enabledContenders.stream()
                 .map(Contender::displayName)
                 .collect(Collectors.joining(", ")));
@@ -168,35 +181,40 @@ class SimplePerformanceTest {
 
         // Timed runs
         System.out.println("\nTimed runs:");
-        java.util.Map<Contender, Result> results = new java.util.EnumMap<>(Contender.class);
+        java.util.Map<Contender, List<Result>> results = new java.util.EnumMap<>(Contender.class);
 
         for (Contender contender : enabledContenders) {
-            Result result = timeRun(contender.displayName(), () -> getRunner(contender).apply(files));
-            results.put(contender, result);
+            List<Result> contenderResults = new ArrayList<>();
+            for (int i = 0; i < runCount; i++) {
+                Result result = timeRun(contender.displayName() + " [" + (i + 1) + "/" + runCount + "]",
+                        () -> getRunner(contender).apply(files));
+                contenderResults.add(result);
+            }
+            results.put(contender, contenderResults);
         }
 
         // Print results
-        printResults(files.size(), enabledContenders, results);
+        printResults(files.size(), runCount, enabledContenders, results);
 
         // Verify correctness - compare all results against each other
         verifyCorrectness(results);
     }
 
-    private void verifyCorrectness(java.util.Map<Contender, Result> results) {
+    private void verifyCorrectness(java.util.Map<Contender, List<Result>> results) {
         if (results.size() < 2) {
             return;
         }
 
-        // Use first result as reference
-        java.util.Map.Entry<Contender, Result> first = results.entrySet().iterator().next();
-        Result reference = first.getValue();
+        // Use first result from first contender as reference
+        java.util.Map.Entry<Contender, List<Result>> first = results.entrySet().iterator().next();
+        Result reference = first.getValue().get(0);
         String referenceName = first.getKey().displayName();
 
-        for (java.util.Map.Entry<Contender, Result> entry : results.entrySet()) {
+        for (java.util.Map.Entry<Contender, List<Result>> entry : results.entrySet()) {
             if (entry.getKey() == first.getKey()) {
                 continue;
             }
-            Result other = entry.getValue();
+            Result other = entry.getValue().get(0);
             String otherName = entry.getKey().displayName();
 
             assertThat(other.passengerCount())
@@ -580,8 +598,8 @@ class SimplePerformanceTest {
         return new Result(passengerCount, tripDistance, fareAmount, 0, rowCount);
     }
 
-    private void printResults(int fileCount, Set<Contender> enabledContenders,
-            java.util.Map<Contender, Result> results) throws IOException {
+    private void printResults(int fileCount, int runCount, Set<Contender> enabledContenders,
+            java.util.Map<Contender, List<Result>> results) throws IOException {
         int cpuCores = Runtime.getRuntime().availableProcessors();
         long totalBytes = 0;
         for (Path file : getAvailableFiles()) {
@@ -589,7 +607,7 @@ class SimplePerformanceTest {
         }
 
         // Use the first available result to get row count
-        Result firstResult = results.values().iterator().next();
+        Result firstResult = results.values().iterator().next().get(0);
 
         System.out.println("\n" + "=".repeat(100));
         System.out.println("PERFORMANCE TEST RESULTS");
@@ -604,34 +622,56 @@ class SimplePerformanceTest {
         System.out.println("  Files processed: " + fileCount);
         System.out.println("  Total rows:      " + String.format("%,d", firstResult.rowCount()));
         System.out.println("  Total size:      " + String.format("%,.1f MB", totalBytes / (1024.0 * 1024.0)));
+        System.out.println("  Runs per contender: " + runCount);
         System.out.println();
 
         // Correctness verification (only if multiple contenders ran)
         if (results.size() > 1) {
             System.out.println("Correctness Verification:");
             System.out.println(String.format("  %-25s %17s %17s %17s", "", "passenger_count", "trip_distance", "fare_amount"));
-            for (java.util.Map.Entry<Contender, Result> entry : results.entrySet()) {
-                Result r = entry.getValue();
+            for (java.util.Map.Entry<Contender, List<Result>> entry : results.entrySet()) {
+                Result r = entry.getValue().get(0);
                 System.out.println(String.format("  %-25s %,17d %,17.2f %,17.2f",
                         entry.getKey().displayName(), r.passengerCount(), r.tripDistance(), r.fareAmount()));
             }
             System.out.println();
         }
 
-        // Performance comparison
-        System.out.println("Performance:");
-        System.out.println(String.format("  %-25s %12s %15s %18s %12s",
+        // Performance comparison - show all runs and averages
+        System.out.println("Performance (all runs):");
+        System.out.println(String.format("  %-30s %12s %15s %18s %12s",
                 "Contender", "Time (s)", "Records/sec", "Records/sec/core", "MB/sec"));
-        System.out.println("  " + "-".repeat(90));
+        System.out.println("  " + "-".repeat(95));
 
-        for (java.util.Map.Entry<Contender, Result> entry : results.entrySet()) {
+        for (java.util.Map.Entry<Contender, List<Result>> entry : results.entrySet()) {
             Contender c = entry.getKey();
+            List<Result> contenderResults = entry.getValue();
             // Hardwood uses parallelism (all cores), parquet-java is single-threaded
             int cores = isHardwood(c) ? cpuCores : 1;
-            printResultRow(c.displayName(), entry.getValue(), cores, totalBytes);
+
+            // Print each individual run
+            for (int i = 0; i < contenderResults.size(); i++) {
+                String label = c.displayName() + " [" + (i + 1) + "]";
+                printResultRow(label, contenderResults.get(i), cores, totalBytes);
+            }
+
+            // Calculate and print average
+            double avgDurationMs = contenderResults.stream()
+                    .mapToLong(Result::durationMs)
+                    .average()
+                    .orElse(0);
+            long avgRowCount = contenderResults.get(0).rowCount(); // Same for all runs
+            Result avgResult = new Result(0, 0, 0, (long) avgDurationMs, avgRowCount);
+            printResultRow(c.displayName() + " [AVG]", avgResult, cores, totalBytes);
+
+            // Print min/max times
+            long minDuration = contenderResults.stream().mapToLong(Result::durationMs).min().orElse(0);
+            long maxDuration = contenderResults.stream().mapToLong(Result::durationMs).max().orElse(0);
+            System.out.println(String.format("  %-30s   min: %.2fs, max: %.2fs, spread: %.2fs",
+                    "", minDuration / 1000.0, maxDuration / 1000.0, (maxDuration - minDuration) / 1000.0));
+            System.out.println();
         }
 
-        System.out.println();
         System.out.println("=".repeat(100));
     }
 
@@ -646,7 +686,7 @@ class SimplePerformanceTest {
         double recordsPerSecPerCore = recordsPerSec / cpuCores;
         double mbPerSec = (totalBytes / (1024.0 * 1024.0)) / seconds;
 
-        System.out.println(String.format("  %-25s %12.2f %,15.0f %,18.0f %12.1f",
+        System.out.println(String.format("  %-30s %12.2f %,15.0f %,18.0f %12.1f",
                 name,
                 seconds,
                 recordsPerSec,
